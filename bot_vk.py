@@ -3,10 +3,10 @@ import sys
 import json
 import logging
 import random
-import ctypes
 import atexit
 import requests
 import time
+import signal
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, List, Tuple
 
@@ -25,17 +25,17 @@ MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
 
-# ---------- Не даём Windows уснуть ----------
-ES_CONTINUOUS = 0x80000000
-ES_SYSTEM_REQUIRED = 0x00000001
+# ---------- Graceful shutdown ----------
+shutdown_requested = False
 
-def prevent_sleep() -> None:
-	ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+def signal_handler(signum, frame):
+	global shutdown_requested
+	logging.getLogger("vk-mafia-bot").info(f"Received signal {signum}, shutting down gracefully...")
+	shutdown_requested = True
 
-def allow_sleep() -> None:
-	ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
-
-atexit.register(allow_sleep)
+def setup_signal_handlers():
+	signal.signal(signal.SIGINT, signal_handler)
+	signal.signal(signal.SIGTERM, signal_handler)
 
 
 def configure_logging() -> None:
@@ -47,17 +47,26 @@ def configure_logging() -> None:
 
 def load_config() -> Tuple[str, int, str, str]:
 	load_dotenv()
+	
 	token = os.getenv("VK_GROUP_TOKEN", "").strip()
+	if not token:
+		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")
+	
 	group_id_str = os.getenv("VK_GROUP_ID", "").strip()
-	openrouter_key = os.getenv("DEEPSEEK_API_KEY", "").strip()  # ключ OpenRouter
+	if not group_id_str:
+		raise RuntimeError("VK_GROUP_ID is not set in .env")
+	if not group_id_str.isdigit():
+		raise RuntimeError("VK_GROUP_ID must be a number (без минуса)")
+	
+	openrouter_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+	if not openrouter_key:
+		logging.warning("DEEPSEEK_API_KEY is not set - AI chat will be disabled")
+	
 	system_prompt = (
 		os.getenv("AI_SYSTEM_PROMPT", "").strip()
 		or "Ты дружелюбный нейросотрудник сообщества Cry Cat. Отвечай кратко (до 380 символов) и по делу на русском. Если спрашивают про бота — есть игры «Мафия», «Угадай число» и режим «ИИ‑чат»."
 	)
-	if not token:
-		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")
-	if not group_id_str.isdigit():
-		raise RuntimeError("VK_GROUP_ID must be a number (без минуса)")
+	
 	return token, int(group_id_str), openrouter_key, system_prompt
 
 
@@ -170,6 +179,9 @@ def build_empty_keyboard() -> str:
 
 # ---------- Вспомогательные ----------
 def send_message(vk, peer_id: int, text: str, keyboard: Optional[str] = None) -> None:
+	if not text.strip():
+		return
+		
 	params: dict[str, object] = {
 		"peer_id": peer_id,
 		"random_id": 0,
@@ -177,7 +189,13 @@ def send_message(vk, peer_id: int, text: str, keyboard: Optional[str] = None) ->
 	}
 	if keyboard is not None:
 		params["keyboard"] = keyboard
-	vk.messages.send(**params)
+	
+	try:
+		vk.messages.send(**params)
+	except Exception as e:
+		logger = logging.getLogger("vk-mafia-bot")
+		logger.error(f"Failed to send message to {peer_id}: {e}")
+		# Don't crash the bot on send errors
 
 
 def mention(user_id: int, name: str = "игрок") -> str:
@@ -221,12 +239,17 @@ def get_model_candidates() -> List[str]:
 def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str) -> str:
 	if not api_key:
 		return "ИИ не настроен. Добавьте DEEPSEEK_API_KEY в .env."
+	
+	if not user_text.strip():
+		return "Пожалуйста, напишите что-нибудь."
+	
 	messages = [{"role": "system", "content": system_prompt}]
 	messages.extend(history[-MAX_HISTORY_MESSAGES:])
 	messages.append({"role": "user", "content": user_text})
 
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
+	
 	for model in get_model_candidates():
 		for attempt in range(2):  # до 2 попыток на модель
 			try:
@@ -266,10 +289,14 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					time.sleep(1 + attempt * 2)
 					continue
 				break
+			except requests.RequestException as e:
+				last_err = f"Request error: {e}"
+				break
 			except Exception as e:
 				last_err = str(e)
 				break
 		logger.info(f"AI fallback: {last_err} on model={model}")
+	
 	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
 
 
@@ -503,7 +530,7 @@ def handle_ai_message(vk, peer_id: int, user_text: str, api_key: str, system_pro
 def main() -> None:
 	configure_logging()
 	load_dotenv()
-	prevent_sleep()
+	setup_signal_handlers()
 	logger = logging.getLogger("vk-mafia-bot")
 	logger.info(f"AI endpoint: {DEEPSEEK_API_URL}")
 	logger.info(f"AI models: {get_model_candidates()}")
@@ -519,102 +546,111 @@ def main() -> None:
 
 	logger.info("Bot started. Listening for events...")
 
-	for event in longpoll.listen():
-		if event.type != VkBotEventType.MESSAGE_NEW:
-			continue
+	while not shutdown_requested:
+		try:
+			for event in longpoll.listen():
+				if event.type != VkBotEventType.MESSAGE_NEW:
+					continue
 
-		message = event.message
-		peer_id = message.peer_id
-		is_dm = peer_id < 2000000000  # личка
-		text_raw = (message.text or "").strip()
-		text = text_raw.lower()
-		user_id = message.from_id
+				message = event.message
+				peer_id = message.peer_id
+				is_dm = peer_id < 2000000000  # личка
+				text_raw = (message.text or "").strip()
+				text = text_raw.lower()
+				user_id = message.from_id
 
-		payload = {}
-		if message.payload:
-			try:
-				payload = json.loads(message.payload)
-			except Exception:
 				payload = {}
+				if message.payload:
+					try:
+						payload = json.loads(message.payload)
+					except Exception:
+						payload = {}
 
-		# Команды
-		if text == "/start":
-			send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
-			send_message(vk, peer_id, "Привет! Выбери игру или включи «ИИ‑чат».", keyboard=build_main_keyboard())
-			continue
-
-		# Текстовые синонимы для кнопок
-		if text in {"мафия"}:
-			handle_start_mafia(vk, peer_id, user_id)
-			continue
-		if text in {"угадай число", "угадай", "число"}:
-			handle_start_guess(vk, peer_id, user_id)
-			continue
-
-		action = payload.get("action") if isinstance(payload, dict) else None
-
-		# Мафия
-		if action == "start_mafia":
-			handle_start_mafia(vk, peer_id, user_id)
-			continue
-		if action == "maf_join":
-			handle_mafia_join(vk, peer_id, user_id)
-			continue
-		if action == "maf_leave":
-			handle_mafia_leave(vk, peer_id, user_id)
-			continue
-		if action == "maf_cancel":
-			handle_mafia_cancel(vk, peer_id, user_id)
-			continue
-		if action == "maf_begin":
-			handle_mafia_begin(vk, peer_id, user_id)
-			continue
-
-		# Угадай число
-		if action == "start_guess":
-			handle_start_guess(vk, peer_id, user_id)
-			continue
-		if action == "g_join":
-			handle_guess_join(vk, peer_id, user_id)
-			continue
-		if action == "g_leave":
-			handle_guess_leave(vk, peer_id, user_id)
-			continue
-		if action == "g_cancel":
-			handle_guess_cancel(vk, peer_id, user_id)
-			continue
-		if action == "g_begin":
-			handle_guess_begin(vk, peer_id, user_id)
-			continue
-
-		# ИИ‑чат управление (в беседах)
-		if action == "ai_on":
-			handle_ai_on(vk, peer_id)
-			continue
-		if action == "ai_off":
-			handle_ai_off(vk, peer_id)
-			continue
-
-		# Ход в игре «Угадай число»: любое сообщение с числом
-		if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
-			if text.isdigit():
-				guess = int(text)
-				sess = GUESS_SESSIONS[peer_id]
-				if sess.min_value <= guess <= sess.max_value:
-					handle_guess_attempt(vk, peer_id, user_id, guess)
-					continue
-				else:
-					send_message(vk, peer_id, f"Введи число от {sess.min_value} до {sess.max_value}.")
+				# Команды
+				if text == "/start":
+					send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
+					send_message(vk, peer_id, "Привет! Выбери игру или включи «ИИ‑чат».", keyboard=build_main_keyboard())
 					continue
 
-		# ИИ‑чат: в личке — всегда; в беседе — только если включён
-		if text_raw and ai_enabled_for_peer(peer_id, is_dm):
-			handle_ai_message(vk, peer_id, text_raw, openrouter_key, system_prompt)
-			continue
+				# Текстовые синонимы для кнопок
+				if text in {"мафия"}:
+					handle_start_mafia(vk, peer_id, user_id)
+					continue
+				if text in {"угадай число", "угадай", "число"}:
+					handle_start_guess(vk, peer_id, user_id)
+					continue
 
-		# Ответ о неизвестной команде — только если сообщение похоже на команду
-		if text.startswith("/") or text in {"help", "помощь", "команды"}:
-			send_message(vk, peer_id, "Команда не распознана. Напиши /start, чтобы выбрать игру.")
+				action = payload.get("action") if isinstance(payload, dict) else None
+
+				# Мафия
+				if action == "start_mafia":
+					handle_start_mafia(vk, peer_id, user_id)
+					continue
+				if action == "maf_join":
+					handle_mafia_join(vk, peer_id, user_id)
+					continue
+				if action == "maf_leave":
+					handle_mafia_leave(vk, peer_id, user_id)
+					continue
+				if action == "maf_cancel":
+					handle_mafia_cancel(vk, peer_id, user_id)
+					continue
+				if action == "maf_begin":
+					handle_mafia_begin(vk, peer_id, user_id)
+					continue
+
+				# Угадай число
+				if action == "start_guess":
+					handle_start_guess(vk, peer_id, user_id)
+					continue
+				if action == "g_join":
+					handle_guess_join(vk, peer_id, user_id)
+					continue
+				if action == "g_leave":
+					handle_guess_leave(vk, peer_id, user_id)
+					continue
+				if action == "g_cancel":
+					handle_guess_cancel(vk, peer_id, user_id)
+					continue
+				if action == "g_begin":
+					handle_guess_begin(vk, peer_id, user_id)
+					continue
+
+				# ИИ‑чат управление (в беседах)
+				if action == "ai_on":
+					handle_ai_on(vk, peer_id)
+					continue
+				if action == "ai_off":
+					handle_ai_off(vk, peer_id)
+					continue
+
+				# Ход в игре «Угадай число»: любое сообщение с числом
+				if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
+					if text.isdigit():
+						guess = int(text)
+						sess = GUESS_SESSIONS[peer_id]
+						if sess.min_value <= guess <= sess.max_value:
+							handle_guess_attempt(vk, peer_id, user_id, guess)
+							continue
+						else:
+							send_message(vk, peer_id, f"Введи число от {sess.min_value} до {sess.max_value}.")
+							continue
+
+				# ИИ‑чат: в личке — всегда; в беседе — только если включён
+				if text_raw and ai_enabled_for_peer(peer_id, is_dm):
+					handle_ai_message(vk, peer_id, text_raw, openrouter_key, system_prompt)
+					continue
+
+				# Ответ о неизвестной команде — только если сообщение похоже на команду
+				if text.startswith("/") or text in {"help", "помощь", "команды"}:
+					send_message(vk, peer_id, "Команда не распознана. Напиши /start, чтобы выбрать игру.")
+
+		except Exception as e:
+			logger.exception("Error during longpoll listen: %s", e)
+			if not shutdown_requested:
+				time.sleep(1) # Retry after a short delay
+
+	logger.info("Bot shutting down gracefully.")
 
 if __name__ == "__main__":
 	main()
