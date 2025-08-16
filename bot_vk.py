@@ -6,6 +6,7 @@ import random
 import ctypes
 import atexit
 import requests
+import time
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, List, Tuple
 
@@ -16,10 +17,11 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 
 # ---------- Настройки OpenRouter (DeepSeek) ----------
-DEEPSEEK_API_URL = os.getenv("OPENROUTER_API_URL", "https://api.openrouter.ai/v1/chat/completions")
-DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-r1-distill-qwen-14b:free")
-MAX_HISTORY_MESSAGES = 12  # храним последние N сообщений (user/assistant попарно)
-MAX_AI_CHARS = 380         # ограничение длины ответа ИИ (символы)
+DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
+OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "").strip()
+MAX_HISTORY_MESSAGES = 12
+MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
 
@@ -207,7 +209,15 @@ def clamp_text(text: str, max_chars: int = MAX_AI_CHARS) -> str:
 	return t[:cut].rstrip() + "…"
 
 
-# ---------- DeepSeek через OpenRouter ----------
+def get_model_candidates() -> List[str]:
+	models_csv = os.getenv("OPENROUTER_MODELS", "").strip()
+	if models_csv:
+		return [m.strip() for m in models_csv.split(",") if m.strip()]
+	model = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free").strip()
+	return [model]
+
+
+# ---------- DeepSeek через OpenRouter (с авто‑переключением моделей) ----------
 def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str) -> str:
 	if not api_key:
 		return "ИИ не настроен. Добавьте DEEPSEEK_API_KEY в .env."
@@ -215,28 +225,52 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	messages.extend(history[-MAX_HISTORY_MESSAGES:])
 	messages.append({"role": "user", "content": user_text})
 
-	try:
-		resp = requests.post(
-			DEEPSEEK_API_URL,
-			headers={
-				"Authorization": f"Bearer {api_key}",
-				"Content-Type": "application/json",
-				"HTTP-Referer": AI_REFERER,
-				"X-Title": AI_TITLE,
-			},
-			json={
-				"model": DEEPSEEK_MODEL,
-				"messages": messages,
-				"temperature": 0.6,
-				"max_tokens": 180,  # примерно под 300–400 символов
-			},
-			timeout=45,
-		)
-		resp.raise_for_status()
-		data = resp.json()
-		return data["choices"][0]["message"]["content"].strip()
-	except Exception as exc:
-		return f"ИИ временно недоступен ({exc}). Попробуйте позже."
+	logger = logging.getLogger("vk-mafia-bot")
+	last_err = "unknown"
+	for model in get_model_candidates():
+		for attempt in range(2):  # до 2 попыток на модель
+			try:
+				resp = requests.post(
+					DEEPSEEK_API_URL,
+					headers={
+						"Authorization": f"Bearer {api_key}",
+						"Content-Type": "application/json",
+						"HTTP-Referer": AI_REFERER,
+						"X-Title": AI_TITLE,
+					},
+					json={
+						"model": model,
+						"messages": messages,
+						"temperature": 0.6,
+						"max_tokens": 180,
+					},
+					timeout=45,
+				)
+				resp.raise_for_status()
+				data = resp.json()
+				if not isinstance(data, dict) or "choices" not in data or not data["choices"]:
+					last_err = "invalid response (no choices)"
+					break
+				msg = data["choices"][0].get("message", {})
+				text = (msg.get("content") or "").strip()
+				if not text:
+					last_err = "empty content"
+					break
+				logger.info(f"AI OK model={model} attempt={attempt+1}")
+				return text
+			except requests.HTTPError as e:
+				code = e.response.status_code if e.response else None
+				last_err = f"HTTP {code}"
+				# На 429/5xx пробуем ещё раз и/или другую модель
+				if code in (429, 500, 502, 503, 504):
+					time.sleep(1 + attempt * 2)
+					continue
+				break
+			except Exception as e:
+				last_err = str(e)
+				break
+		logger.info(f"AI fallback: {last_err} on model={model}")
+	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
 
 
 def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
@@ -468,8 +502,11 @@ def handle_ai_message(vk, peer_id: int, user_text: str, api_key: str, system_pro
 # ---------- Основной цикл ----------
 def main() -> None:
 	configure_logging()
+	load_dotenv()
 	prevent_sleep()
 	logger = logging.getLogger("vk-mafia-bot")
+	logger.info(f"AI endpoint: {DEEPSEEK_API_URL}")
+	logger.info(f"AI models: {get_model_candidates()}")
 	try:
 		token, group_id, openrouter_key, system_prompt = load_config()
 	except Exception as exc:
