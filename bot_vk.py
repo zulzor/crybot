@@ -232,12 +232,13 @@ def main() -> None:
 			handle_begin(vk, peer_id, user_id)
 			continue
 
-		# Optional: brief help on unknown input
-		send_message(
-			vk,
-			peer_id,
-			"Команда не распознана. Напиши /start, чтобы увидеть кнопку.",
-		)
+		# Optional: reply about unknown command only when input looks like a command
+		if text.startswith("/") or text in {"help", "помощь", "команды"}:
+			send_message(
+				vk,
+				peer_id,
+				"Команда не распознана. Напиши /start, чтобы выбрать игру.",
+			)
 
 
 if __name__ == "__main__":
