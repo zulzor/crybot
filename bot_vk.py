@@ -16,7 +16,7 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 
 # ---------- Настройки OpenRouter (DeepSeek) ----------
-DEEPSEEK_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions")
+DEEPSEEK_API_URL = os.getenv("OPENROUTER_API_URL", "ttps://api.openrouter.ai/v1/chat/completions")
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-r1-distill-qwen-14b:free")
 MAX_HISTORY_MESSAGES = 12  # храним последние N сообщений (user/assistant попарно)
 MAX_AI_CHARS = 380         # ограничение длины ответа ИИ (символы)
