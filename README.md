@@ -18,10 +18,9 @@ git clone <repository-url>
 cd crybot
 ```
 
-2. Установите зависимости:
-```bash
-pip install -r requirements.txt
-```
+2. **Для Windows (рекомендуется):**
+   - Запустите `install_dependencies.bat` от имени администратора
+   - Или установите вручную: `pip install -r requirements.txt`
 
 3. Создайте файл `.env` с настройками:
 ```env
@@ -34,9 +33,20 @@ AI_SYSTEM_PROMPT=Ты дружелюбный нейросотрудник соо
 
 ## Запуск
 
+### Обычный запуск:
 ```bash
 python bot_vk.py
 ```
+
+### Windows - через скрипты:
+- **`start_bot.bat`** - запуск через командную строку
+- **`start_bot.ps1`** - запуск через PowerShell
+
+### Планировщик задач Windows:
+1. Откройте "Планировщик задач"
+2. Создайте новую задачу
+3. В действии укажите: `C:\Users\jolab\Desktop\crybot\start_bot.bat`
+4. Установите нужное расписание
 
 ## Настройка
 
@@ -54,6 +64,20 @@ python bot_vk.py
 - `bot_vk.py` - основной файл бота
 - `requirements.txt` - зависимости Python
 - `.env` - конфигурация (создать самостоятельно)
+- `start_bot.bat` - Windows скрипт запуска
+- `start_bot.ps1` - PowerShell скрипт запуска
+- `install_dependencies.bat` - установка зависимостей
+
+## Устранение проблем
+
+### Ошибка "ModuleNotFoundError":
+- Запустите `install_dependencies.bat` от имени администратора
+- Или выполните: `pip install -r requirements.txt`
+
+### Планировщик задач не запускает:
+- Убедитесь, что Python добавлен в PATH
+- Проверьте права доступа к папке проекта
+- Используйте полный путь к `start_bot.bat`
 
 ## Лицензия
 
