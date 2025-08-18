@@ -338,10 +338,17 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					break
 				msg = data["choices"][0].get("message", {})
 				text = (msg.get("content") or "").strip()
+				# Если контент пустой, попробуем взять рассуждения
 				if not text:
-					last_err = "empty content"
-					break
-				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1}")
+					alt = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+					if alt:
+						text = alt
+					else:
+						last_err = "empty content"
+						# пробуем ещё одну попытку
+						continue
+				usage = data.get("usage") or {}
+				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1} usage={usage}")
 				return text
 			except requests.HTTPError as e:
 				code = e.response.status_code if e.response else None
@@ -596,8 +603,7 @@ def handle_ai_message(vk, peer_id: int, user_text: str,
 
 # ---------- ИИ‑чат утилиты ----------
 def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
-	if is_dm:
-		return True
+	# ИИ включается только вручную и для ЛС, и для бесед
 	return peer_id in AI_ACTIVE_CHATS
 
 
