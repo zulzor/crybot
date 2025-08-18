@@ -180,6 +180,10 @@ class UserProfile:
 	user_id: int
 	name: str = ""
 	stats: Dict[str, int] = field(default_factory=dict)  # game_key -> points
+	privacy_accepted: bool = False  # Принятие политики конфиденциальности
+	privacy_accepted_at: str = ""   # Дата принятия
+	gdpr_consent: bool = False      # Согласие на обработку персональных данных
+	gdpr_consent_at: str = ""       # Дата согласия
 
 PROFILES: Dict[int, UserProfile] = {}
 PROFILES_FILE = os.getenv("PROFILES_FILE", "profiles.json").strip() or "profiles.json"
@@ -193,7 +197,15 @@ def load_profiles() -> None:
 		for uid_str, prof in data.items():
 			try:
 				uid = int(uid_str)
-				PROFILES[uid] = UserProfile(user_id=uid, name=prof.get("name", ""), stats=dict(prof.get("stats", {})))
+				PROFILES[uid] = UserProfile(
+					user_id=uid, 
+					name=prof.get("name", ""), 
+					stats=dict(prof.get("stats", {})),
+					privacy_accepted=prof.get("privacy_accepted", False),
+					privacy_accepted_at=prof.get("privacy_accepted_at", ""),
+					gdpr_consent=prof.get("gdpr_consent", False),
+					gdpr_consent_at=prof.get("gdpr_consent_at", "")
+				)
 			except Exception:
 				continue
 	except Exception:
@@ -202,7 +214,16 @@ def load_profiles() -> None:
 def save_profiles() -> None:
 	try:
 		os.makedirs(os.path.dirname(PROFILES_FILE) or ".", exist_ok=True)
-		out = {str(uid): {"name": p.name, "stats": p.stats} for uid, p in PROFILES.items()}
+		out = {
+			str(uid): {
+				"name": p.name, 
+				"stats": p.stats,
+				"privacy_accepted": p.privacy_accepted,
+				"privacy_accepted_at": p.privacy_accepted_at,
+				"gdpr_consent": p.gdpr_consent,
+				"gdpr_consent_at": p.gdpr_consent_at
+			} for uid, p in PROFILES.items()
+		}
 		with open(PROFILES_FILE, "w", encoding="utf-8") as f:
 			json.dump(out, f, ensure_ascii=False, indent=2)
 	except Exception:
@@ -238,6 +259,32 @@ def format_top(vk, game_key: str, limit: int = 10) -> str:
 		name = PROFILES.get(uid).name or "игрок"
 		lines.append(f"{idx}. {mention(uid, name)} — {pts}")
 	return "\n".join(lines)
+
+
+def check_user_consents(user_id: int) -> Tuple[bool, bool]:
+	"""Проверяет, принял ли пользователь необходимые согласия"""
+	prof = PROFILES.get(user_id)
+	if not prof:
+		return False, False
+	return prof.privacy_accepted, prof.gdpr_consent
+
+
+def accept_privacy_policy(user_id: int) -> None:
+	"""Пользователь принимает политику конфиденциальности"""
+	prof = PROFILES.get(user_id)
+	if prof:
+		prof.privacy_accepted = True
+		prof.privacy_accepted_at = datetime.now().isoformat()
+		save_profiles()
+
+
+def accept_gdpr_consent(user_id: int) -> None:
+	"""Пользователь принимает согласие на обработку персональных данных"""
+	prof = PROFILES.get(user_id)
+	if prof:
+		prof.gdpr_consent = True
+		prof.gdpr_consent_at = datetime.now().isoformat()
+		save_profiles()
 
 # ---------- Викторина состояния ----------
 @dataclass
@@ -331,6 +378,17 @@ def build_admin_keyboard() -> str:
 def build_dm_info_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	return keyboard.get_keyboard()
+
+
+def build_privacy_consent_keyboard() -> str:
+	"""Клавиатура для принятия политики конфиденциальности"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Принять политику конфиденциальности", color=VkKeyboardColor.POSITIVE, payload={"action": "accept_privacy"})
+	keyboard.add_line()
+	keyboard.add_button("Принять согласие на обработку данных", color=VkKeyboardColor.POSITIVE, payload={"action": "accept_gdpr"})
+	keyboard.add_line()
+	keyboard.add_button("Отказаться", color=VkKeyboardColor.NEGATIVE, payload={"action": "decline_privacy"})
 	return keyboard.get_keyboard()
 
 
@@ -1248,13 +1306,22 @@ def main() -> None:
 			handle_start_squid(vk, peer_id)
 			continue
 		if text in {"/me", "профиль", "профиль мой"}:
+			# Проверяем согласия перед показом профиля
+			privacy_accepted, gdpr_consent = check_user_consents(user_id)
+			if not privacy_accepted or not gdpr_consent:
+				msg = "⚠️ Для использования бота необходимо принять политику конфиденциальности и согласие на обработку персональных данных."
+				send_message(vk, peer_id, msg, keyboard=build_privacy_consent_keyboard())
+				continue
+			
 			prof = get_profile(vk, user_id)
 			s = prof.stats
 			msg = (
 				f"Профиль {mention(user_id, prof.name or 'игрок')}:\n"
 				f"Викторина очков: {s.get('quiz_points', 0)}\n"
 				f"Угадай число побед: {s.get('guess_wins', 0)}\n"
-				f"Кальмар побед: {s.get('squid_wins', 0)}"
+				f"Кальмар побед: {s.get('squid_wins', 0)}\n"
+				f"✅ Политика конфиденциальности: принята\n"
+				f"✅ GDPR согласие: принято"
 			)
 			send_message(vk, peer_id, msg)
 			continue
@@ -1375,6 +1442,19 @@ def main() -> None:
 		if action == "admin_close":
 			if user_id in ADMIN_USER_IDS:
 				send_message(vk, peer_id, "Админ‑панель закрыта.", keyboard=build_main_keyboard())
+			continue
+		
+		# Обработка согласий на конфиденциальность
+		if action == "accept_privacy":
+			accept_privacy_policy(user_id)
+			send_message(vk, peer_id, "✅ Политика конфиденциальности принята!", keyboard=build_main_keyboard())
+			continue
+		if action == "accept_gdpr":
+			accept_gdpr_consent(user_id)
+			send_message(vk, peer_id, "✅ Согласие на обработку персональных данных принято!", keyboard=build_main_keyboard())
+			continue
+		if action == "decline_privacy":
+			send_message(vk, peer_id, "❌ Без принятия политики конфиденциальности использование бота невозможно.", keyboard=build_privacy_consent_keyboard())
 			continue
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
