@@ -16,6 +16,9 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 
+# Ранний загрузчик .env до чтения переменных окружения в константах ниже
+load_dotenv()
+
 # ---------- Настройки OpenRouter (DeepSeek) ----------
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
