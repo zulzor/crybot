@@ -338,15 +338,10 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					break
 				msg = data["choices"][0].get("message", {})
 				text = (msg.get("content") or "").strip()
-				# Если контент пустой, попробуем взять рассуждения
 				if not text:
-					alt = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
-					if alt:
-						text = alt
-					else:
-						last_err = "empty content"
-						# пробуем ещё одну попытку
-						continue
+					last_err = "empty content"
+					# пробуем ещё одну попытку
+					continue
 				usage = data.get("usage") or {}
 				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1} usage={usage}")
 				return text
