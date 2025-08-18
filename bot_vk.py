@@ -344,7 +344,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
 	for model in get_aitunnel_model_candidates():
-		for attempt in range(1):
+		for attempt in range(2):
 			try:
 				resp = requests.post(
 					AITUNNEL_API_URL,
@@ -370,7 +370,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				text = (msg.get("content") or "").strip()
 				if not text:
 					last_err = "empty content"
-					# пробуем ещё одну попытку
+					# при пустом ответе пробуем ещё раз (до 2 попыток)
 					continue
 				usage = data.get("usage") or {}
 				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1} usage={usage}")
@@ -386,7 +386,8 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				last_err = str(e)
 				break
 		logger.info(f"AI fallback (AITunnel): {last_err} on model={model}")
-	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
+	# дружелюбный ответ вместо технической ошибки
+	return "Хм, не расслышала. Скажи иначе, пожалуйста."
 
 
 def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str, str]],
