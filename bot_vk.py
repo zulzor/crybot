@@ -140,6 +140,7 @@ GUESS_SESSIONS: Dict[int, GuessNumberSession] = {}
 # В личных сообщениях ИИ всегда активен; в беседах — только после кнопки «ИИ‑чат»
 AI_ACTIVE_CHATS: Set[int] = set()
 AI_HISTORY: Dict[int, List[Dict[str, str]]] = {}  # peer_id -> [{"role": "...", "content": "..."}]
+AI_CONFIRMATION_MODE: Dict[int, bool] = {}  # peer_id -> True если ждет подтверждения "привет"
 
 
 # ---------- Клавиатуры ----------
@@ -150,6 +151,19 @@ def build_main_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	return keyboard.get_keyboard()
+
+
+def build_dm_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	return keyboard.get_keyboard()
+
+
+def build_ai_confirmation_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Да, к ИИ", color=VkKeyboardColor.POSITIVE, payload={"action": "ai_confirm_yes"})
+	keyboard.add_button("Нет, не к ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_confirm_no"})
 	return keyboard.get_keyboard()
 
 
@@ -314,14 +328,25 @@ def add_history(peer_id: int, role: str, content: str) -> None:
 
 
 # ---------- Команды ----------
-def handle_start(vk, peer_id: int) -> None:
+def handle_start(vk, peer_id: int, is_dm: bool = False) -> None:
 	send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
-	send_message(
-		vk,
-		peer_id,
-		"Привет! Выбери игру: «Мафия», «Угадай число», либо включи «ИИ‑чат».",
-		keyboard=build_main_keyboard(),
-	)
+	
+	if is_dm:
+		# В личных сообщениях - только ИИ-чат
+		send_message(
+			vk,
+			peer_id,
+			"Привет! Я ИИ-помощник. Просто напиши мне сообщение, и я отвечу. Чтобы выключить ИИ, нажми кнопку или напиши 'выключись'.",
+			keyboard=build_dm_keyboard(),
+		)
+	else:
+		# В групповых чатах - игры и ИИ
+		send_message(
+			vk,
+			peer_id,
+			"Привет! Выбери игру: «Мафия», «Угадай число», либо включи «ИИ‑чат». Также можешь написать 'привет' для быстрого вызова ИИ.",
+			keyboard=build_main_keyboard(),
+		)
 
 
 # ----- Мафия -----
@@ -512,18 +537,53 @@ def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> No
 # ----- ИИ‑чат -----
 def handle_ai_on(vk, peer_id: int) -> None:
 	AI_ACTIVE_CHATS.add(peer_id)
-	send_message(vk, peer_id, "ИИ‑чат включён для этой беседы. Пишите сообщения — я отвечу. Чтобы выключить, нажмите «Выключить ИИ».", keyboard=build_main_keyboard())
+	send_message(vk, peer_id, "ИИ‑чат включён для этой беседы. Пишите сообщения — я отвечу. Чтобы выключить, нажмите «Выключить ИИ» или напишите 'выключись'.", keyboard=build_main_keyboard())
 
 def handle_ai_off(vk, peer_id: int) -> None:
 	AI_ACTIVE_CHATS.discard(peer_id)
+	AI_CONFIRMATION_MODE.pop(peer_id, None)  # Убираем режим подтверждения
 	send_message(vk, peer_id, "ИИ‑чат выключен для этой беседы.", keyboard=build_main_keyboard())
 
+def handle_ai_confirm_yes(vk, peer_id: int) -> None:
+	AI_ACTIVE_CHATS.add(peer_id)
+	AI_CONFIRMATION_MODE.pop(peer_id, None)
+	send_message(vk, peer_id, "ИИ‑чат включён! Пишите сообщения — я отвечу.", keyboard=build_main_keyboard())
+
+def handle_ai_confirm_no(vk, peer_id: int) -> None:
+	AI_CONFIRMATION_MODE.pop(peer_id, None)
+	send_message(vk, peer_id, "Понял, ИИ не нужен. Выберите игру или напишите 'привет' для вызова ИИ.", keyboard=build_main_keyboard())
+
 def handle_ai_message(vk, peer_id: int, user_text: str, api_key: str, system_prompt: str) -> None:
+	# Проверяем команды выключения ИИ
+	if user_text.lower().strip() in {"выключись", "выключить ии", "выключить ии-чат", "стоп ии", "отключись"}:
+		handle_ai_off(vk, peer_id)
+		return
+	
 	add_history(peer_id, "user", user_text)
 	reply = deepseek_reply(api_key, system_prompt, AI_HISTORY.get(peer_id, []), user_text)
 	reply = clamp_text(reply, MAX_AI_CHARS)
 	add_history(peer_id, "assistant", reply)
 	send_message(vk, peer_id, reply)
+
+def handle_hello_trigger(vk, peer_id: int, is_dm: bool) -> bool:
+	"""Обработка слова 'привет' для вызова ИИ"""
+	if is_dm:
+		# В личных сообщениях ИИ всегда активен
+		return False  # Продолжаем обычную обработку
+	
+	if peer_id in AI_ACTIVE_CHATS:
+		# ИИ уже активен
+		return False
+	
+	# Запрашиваем подтверждение
+	AI_CONFIRMATION_MODE[peer_id] = True
+	send_message(
+		vk, 
+		peer_id, 
+		"Вы обращаетесь ко мне (ИИ)?", 
+		keyboard=build_ai_confirmation_keyboard()
+	)
+	return True  # Обработано, не продолжаем
 
 
 # ---------- Основной цикл ----------
@@ -568,8 +628,7 @@ def main() -> None:
 
 				# Команды
 				if text == "/start":
-					send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
-					send_message(vk, peer_id, "Привет! Выбери игру или включи «ИИ‑чат».", keyboard=build_main_keyboard())
+					handle_start(vk, peer_id, is_dm)
 					continue
 
 				# Текстовые синонимы для кнопок
@@ -623,6 +682,17 @@ def main() -> None:
 				if action == "ai_off":
 					handle_ai_off(vk, peer_id)
 					continue
+				if action == "ai_confirm_yes":
+					handle_ai_confirm_yes(vk, peer_id)
+					continue
+				if action == "ai_confirm_no":
+					handle_ai_confirm_no(vk, peer_id)
+					continue
+
+				# Обработка слова "привет" для вызова ИИ
+				if text == "привет" and not is_dm:
+					if handle_hello_trigger(vk, peer_id, is_dm):
+						continue
 
 				# Ход в игре «Угадай число»: любое сообщение с числом
 				if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
@@ -636,8 +706,8 @@ def main() -> None:
 							send_message(vk, peer_id, f"Введи число от {sess.min_value} до {sess.max_value}.")
 							continue
 
-				# ИИ‑чат: в личке — всегда; в беседе — только если включён
-				if text_raw and ai_enabled_for_peer(peer_id, is_dm):
+				# ИИ‑чат: в личке — всегда; в беседе — только если включён или в режиме подтверждения
+				if text_raw and (ai_enabled_for_peer(peer_id, is_dm) or peer_id in AI_CONFIRMATION_MODE):
 					handle_ai_message(vk, peer_id, text_raw, openrouter_key, system_prompt)
 					continue
 
