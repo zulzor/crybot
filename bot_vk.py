@@ -23,7 +23,7 @@ load_dotenv()
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "").strip()
-MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_MESSAGES = 2
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
@@ -326,7 +326,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"model": model,
 						"messages": messages,
 						"temperature": 0.6,
-						"max_tokens": 120,
+						"max_tokens": 80,
 					},
 					timeout=45,
 				)
@@ -383,7 +383,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"model": model,
 						"messages": messages,
 						"temperature": 0.6,
-						"max_tokens": 120,
+						"max_tokens": 80,
 						"reasoning": {"exclude": True},
 					},
 					timeout=45,
