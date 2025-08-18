@@ -87,7 +87,7 @@ def load_config() -> Tuple[str, int, str, str, str, str]:
 	ai_provider = os.getenv("AI_PROVIDER", AI_PROVIDER).strip().upper()
 	system_prompt = (
 		os.getenv("AI_SYSTEM_PROMPT", "").strip()
-		or "Ты бот Cry Cat. Отвечай по-русски, дружелюбно и очень кратко (до 380 символов). При необходимости вкратце упоминай игры: Мафия, Угадай число, ИИ‑чат."
+		or "Ты Кисаписа-3000. Пиши по-русски, дружелюбно, до 380 символов. По запросу кратко упоминай: Мафия, Угадай число, ИИ‑чат."
 	)
 	if not token:
 		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")

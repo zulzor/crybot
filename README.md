@@ -36,7 +36,7 @@ AITUNNEL_MODEL=deepseek-r1-fast
 # AITUNNEL_MODELS=deepseek-r1-fast,deepseek-r1
 
 # Системный промпт ИИ (выберите один из вариантов ниже)
-AI_SYSTEM_PROMPT=
+AI_SYSTEM_PROMPT=Ты Кисаписа-3000. Пиши по-русски, дружелюбно, до 380 символов. По запросу кратко упоминай: Мафия, Угадай число, ИИ‑чат.
 ```
 
 ## Варианты AI_SYSTEM_PROMPT
