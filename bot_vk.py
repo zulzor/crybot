@@ -23,7 +23,7 @@ load_dotenv()
 # ---------- Настройки OpenRouter (DeepSeek) ----------
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
-OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "").strip()
+OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "deepseek/deepseek-chat-v3-0324:free,deepseek/deepseek-r1-0528:free,qwen/qwen3-coder:free,deepseek/deepseek-r1:free").strip()
 MAX_HISTORY_MESSAGES = 2
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
@@ -88,7 +88,7 @@ def load_config() -> Tuple[str, int, str, str, str, str]:
 	ai_provider = os.getenv("AI_PROVIDER", AI_PROVIDER).strip().upper()
 	system_prompt = (
 		os.getenv("AI_SYSTEM_PROMPT", "").strip()
-		or "Ты Кисаписа-3000. Пиши по-русски, дружелюбно, до 380 символов. По запросу кратко упоминай: Мафия, Угадай число, ИИ‑чат."
+		or "Ты Кисаписа-3000. Пиши по-русски, дружелюбно, до 380 символов. По запросу кратко упоминай: Мафия, Угадай число, Викторина, Кальмар, ИИ‑чат."
 	)
 	if not token:
 		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")
@@ -256,12 +256,39 @@ MAX_QUIZ_ATTEMPTS = 6
 QUIZZES: Dict[int, QuizState] = {}
 
 
+# ---------- Кальмар (Squid Game) ----------
+@dataclass
+class SquidGameSession:
+	players: Set[int] = field(default_factory=set)  # user_id
+	active_players: Set[int] = field(default_factory=set)  # выжившие
+	round_num: int = 0
+	game_type: str = ""  # тип мини-игры
+	started: bool = False
+	waiting_for: Set[int] = field(default_factory=set)  # кто ещё не ответил
+	round_data: Dict = field(default_factory=dict)  # данные раунда
+
+# peer_id -> SquidGameSession
+SQUID_GAMES: Dict[int, SquidGameSession] = {}
+
+# Мини-игры
+SQUID_MINIGAMES = [
+	"Сахарные соты",  # угадать число
+	"Перетягивание каната",  # команды
+	"Мраморные шарики",  # чёт/нечет
+	"Стеклянные мосты"  # лево/право
+]
+
+# peer_id -> SquidGameSession
+SQUID_GAMES: Dict[int, SquidGameSession] = {}
+
+
 # ---------- Клавиатуры ----------
 def build_main_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
 	keyboard.add_button("Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
 	keyboard.add_button("Викторина", color=VkKeyboardColor.SECONDARY, payload={"action": "start_quiz"})
+	keyboard.add_button("Кальмар", color=VkKeyboardColor.PRIMARY, payload={"action": "start_squid"})
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
@@ -316,6 +343,45 @@ def build_quiz_keyboard() -> str:
 	keyboard.add_button("Завершить", color=VkKeyboardColor.NEGATIVE, payload={"action": "quiz_end"})
 	keyboard.add_line()
 	keyboard.add_button("Новый вопрос", color=VkKeyboardColor.PRIMARY, payload={"action": "quiz_next"})
+	return keyboard.get_keyboard()
+
+
+def build_squid_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Присоединиться", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_join"})
+	keyboard.add_button("Выйти", color=VkKeyboardColor.SECONDARY, payload={"action": "squid_leave"})
+	keyboard.add_line()
+	keyboard.add_button("Старт", color=VkKeyboardColor.POSITIVE, payload={"action": "squid_begin"})
+	keyboard.add_button("Отмена", color=VkKeyboardColor.NEGATIVE, payload={"action": "squid_cancel"})
+	return keyboard.get_keyboard()
+
+
+def build_squid_game_keyboard(game_type: str) -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	
+	if game_type == "Сахарные соты":
+		keyboard.add_button("1", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "1"})
+		keyboard.add_button("2", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "2"})
+		keyboard.add_button("3", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "3"})
+		keyboard.add_line()
+		keyboard.add_button("4", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "4"})
+		keyboard.add_button("5", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "5"})
+		keyboard.add_button("6", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "6"})
+		keyboard.add_line()
+		keyboard.add_button("7", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "7"})
+		keyboard.add_button("8", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "8"})
+		keyboard.add_button("9", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "9"})
+		keyboard.add_line()
+		keyboard.add_button("10", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "number": "10"})
+	elif game_type == "Мраморные шарики":
+		keyboard.add_button("Чёт", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "parity": "even"})
+		keyboard.add_line()
+		keyboard.add_button("Нечет", color=VkKeyboardColor.SECONDARY, payload={"action": "squid_guess", "parity": "odd"})
+	elif game_type == "Стеклянные мосты":
+		keyboard.add_button("Лево", color=VkKeyboardColor.PRIMARY, payload={"action": "squid_guess", "direction": "left"})
+		keyboard.add_line()
+		keyboard.add_button("Право", color=VkKeyboardColor.SECONDARY, payload={"action": "squid_guess", "direction": "right"})
+	
 	return keyboard.get_keyboard()
 
 
@@ -848,6 +914,197 @@ def handle_quiz_end(vk, peer_id: int) -> None:
 	send_message(vk, peer_id, "Викторина завершена.", keyboard=build_main_keyboard())
 
 
+# ---------- Кальмар (Squid Game) ----------
+def handle_start_squid(vk, peer_id: int) -> None:
+	SQUID_GAMES.pop(peer_id, None)
+	send_message(vk, peer_id, "🎮 Игра в Кальмара! Присоединяйтесь к игре.", keyboard=build_squid_keyboard())
+
+
+def handle_squid_join(vk, peer_id: int, user_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game:
+		game = SquidGameSession()
+		SQUID_GAMES[peer_id] = game
+	
+	if user_id in game.players:
+		send_message(vk, peer_id, f"{mention(user_id)} уже в игре!")
+		return
+	
+	game.players.add(user_id)
+	game.active_players.add(user_id)
+	
+	players_list = ", ".join(mention(uid) for uid in game.players)
+	send_message(vk, peer_id, f"{mention(user_id)} присоединился! Игроки: {players_list}", keyboard=build_squid_keyboard())
+
+
+def handle_squid_leave(vk, peer_id: int, user_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game:
+		return
+	
+	if user_id in game.players:
+		game.players.discard(user_id)
+		game.active_players.discard(user_id)
+		
+		if not game.players:
+			SQUID_GAMES.pop(peer_id, None)
+			send_message(vk, peer_id, "Все игроки вышли. Игра отменена.", keyboard=build_main_keyboard())
+		else:
+			players_list = ", ".join(mention(uid) for uid in game.players)
+			send_message(vk, peer_id, f"{mention(user_id)} вышел! Игроки: {players_list}", keyboard=build_squid_keyboard())
+
+
+def handle_squid_begin(vk, peer_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game or len(game.players) < 2:
+		send_message(vk, peer_id, "Нужно минимум 2 игрока для начала игры!")
+		return
+	
+	game.started = True
+	game.round_num = 1
+	game.active_players = game.players.copy()
+	start_squid_round(vk, peer_id)
+
+
+def start_squid_round(vk, peer_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game or not game.started:
+		return
+	
+	if len(game.active_players) <= 1:
+		end_squid_game(vk, peer_id)
+		return
+	
+	# Выбираем случайную мини-игру
+	game.game_type = random.choice(SQUID_MINIGAMES)
+	game.waiting_for = game.active_players.copy()
+	
+	round_msg = f"🎮 Раунд {game.round_num}: {game.game_type}\n"
+	round_msg += f"Игроки: {', '.join(mention(uid) for uid in game.active_players)}\n"
+	
+	if game.game_type == "Сахарные соты":
+		round_msg += "Угадайте число от 1 до 10. Кто ближе к загаданному - выживает!"
+		game.round_data = {"target": random.randint(1, 10)}
+	elif game.game_type == "Перетягивание каната":
+		players_list = list(game.active_players)
+		random.shuffle(players_list)
+		mid = len(players_list) // 2
+		team1 = set(players_list[:mid])
+		team2 = set(players_list[mid:])
+		game.round_data = {"team1": team1, "team2": team2}
+		round_msg += f"Команда 1: {', '.join(mention(uid) for uid in team1)}\n"
+		round_msg += f"Команда 2: {', '.join(mention(uid) for uid in team2)}\n"
+		round_msg += "Проигравшая команда выбывает!"
+	elif game.game_type == "Мраморные шарики":
+		round_msg += "Угадайте чёт или нечет. Неправильные выбывают!"
+		game.round_data = {"target": random.choice(["even", "odd"])}
+	elif game.game_type == "Стеклянные мосты":
+		round_msg += "Выберите лево или право. Неправильный выбор = выбывание!"
+		game.round_data = {"target": random.choice(["left", "right"])}
+	
+	send_message(vk, peer_id, round_msg, keyboard=build_squid_game_keyboard(game.game_type))
+
+
+def handle_squid_guess(vk, peer_id: int, user_id: int, payload: Dict) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game or not game.started or user_id not in game.waiting_for:
+		return
+	
+	game.waiting_for.discard(user_id)
+	
+	if game.game_type == "Сахарные соты":
+		guess = int(payload.get("number", "1"))
+		target = game.round_data.get("target", 5)
+		distance = abs(guess - target)
+		game.round_data.setdefault("guesses", {})[user_id] = distance
+		
+		if not game.waiting_for:  # все ответили
+			end_squid_round(vk, peer_id)
+	
+	elif game.game_type == "Мраморные шарики":
+		guess = payload.get("parity", "even")
+		target = game.round_data.get("target", "even")
+		
+		if guess == target:
+			send_message(vk, peer_id, f"✅ {mention(user_id)} выжил!")
+		else:
+			game.active_players.discard(user_id)
+			send_message(vk, peer_id, f"❌ {mention(user_id)} выбыл!")
+		
+		if not game.waiting_for:  # все ответили
+			end_squid_round(vk, peer_id)
+	
+	elif game.game_type == "Стеклянные мосты":
+		guess = payload.get("direction", "left")
+		target = game.round_data.get("target", "left")
+		
+		if guess == target:
+			send_message(vk, peer_id, f"✅ {mention(user_id)} выжил!")
+		else:
+			game.active_players.discard(user_id)
+			send_message(vk, peer_id, f"❌ {mention(user_id)} выбыл!")
+		
+		if not game.waiting_for:  # все ответили
+			end_squid_round(vk, peer_id)
+
+
+def end_squid_round(vk, peer_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game or not game.started:
+		return
+	
+	if game.game_type == "Сахарные соты":
+		guesses = game.round_data.get("guesses", {})
+		if guesses:
+			best_player = min(guesses.items(), key=lambda x: x[1])[0]
+			losers = set(guesses.keys()) - {best_player}
+			
+			for loser in losers:
+				game.active_players.discard(loser)
+				send_message(vk, peer_id, f"❌ {mention(loser)} выбыл!")
+			
+			send_message(vk, peer_id, f"✅ {mention(best_player)} выжил! Загаданное число: {game.round_data.get('target')}")
+	
+	elif game.game_type == "Перетягивание каната":
+		# Случайно выбираем проигравшую команду
+		loser_team = random.choice([game.round_data["team1"], game.round_data["team2"]])
+		for loser in loser_team:
+			game.active_players.discard(loser)
+			send_message(vk, peer_id, f"❌ {mention(loser)} выбыл!")
+		
+		winner_team = game.round_data["team1"] if loser_team == game.round_data["team2"] else game.round_data["team2"]
+		survivors = ", ".join(mention(uid) for uid in winner_team)
+		send_message(vk, peer_id, f"✅ Выжили: {survivors}")
+	
+	# Проверяем, нужно ли продолжать
+	if len(game.active_players) <= 1:
+		end_squid_game(vk, peer_id)
+	else:
+		game.round_num += 1
+		time.sleep(3)  # пауза между раундами
+		start_squid_round(vk, peer_id)
+
+
+def end_squid_game(vk, peer_id: int) -> None:
+	game = SQUID_GAMES.get(peer_id)
+	if not game:
+		return
+	
+	if len(game.active_players) == 1:
+		winner = list(game.active_players)[0]
+		send_message(vk, peer_id, f"🏆 Победитель: {mention(winner)}!", keyboard=build_main_keyboard())
+		increment_stat(vk, winner, "squid_wins", 1)
+	else:
+		send_message(vk, peer_id, "Игра завершена без победителя.", keyboard=build_main_keyboard())
+	
+	SQUID_GAMES.pop(peer_id, None)
+
+
+def handle_squid_cancel(vk, peer_id: int) -> None:
+	SQUID_GAMES.pop(peer_id, None)
+	send_message(vk, peer_id, "Игра в Кальмара отменена.", keyboard=build_main_keyboard())
+
+
 # ---------- ИИ‑чат утилиты ----------
 def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
 	# ИИ включается только вручную и для ЛС, и для бесед
@@ -918,13 +1175,17 @@ def main() -> None:
 		if text in {"викторина"}:
 			handle_start_quiz(vk, peer_id)
 			continue
+		if text in {"кальмар", "squid", "squid game"}:
+			handle_start_squid(vk, peer_id)
+			continue
 		if text in {"/me", "профиль", "профиль мой"}:
 			prof = get_profile(vk, user_id)
 			s = prof.stats
 			msg = (
 				f"Профиль {mention(user_id, prof.name or 'игрок')}:\n"
 				f"Викторина очков: {s.get('quiz_points', 0)}\n"
-				f"Угадай число побед: {s.get('guess_wins', 0)}"
+				f"Угадай число побед: {s.get('guess_wins', 0)}\n"
+				f"Кальмар побед: {s.get('squid_wins', 0)}"
 			)
 			send_message(vk, peer_id, msg)
 			continue
@@ -934,6 +1195,10 @@ def main() -> None:
 			continue
 		if text in {"/top guess", "/top угадай", "топ угадай"}:
 			msg = "Топ угадай число:\n" + format_top(vk, "guess_wins")
+			send_message(vk, peer_id, msg)
+			continue
+		if text in {"/top squid", "/top кальмар", "топ кальмар"}:
+			msg = "Топ 'Кальмар':\n" + format_top(vk, "squid_wins")
 			send_message(vk, peer_id, msg)
 			continue
 		# Админ-панель по команде в ЛС
@@ -977,6 +1242,26 @@ def main() -> None:
 		if action == "quiz_end":
 			handle_quiz_end(vk, peer_id)
 			continue
+		
+		# Кальмар (Squid Game)
+		if action == "start_squid":
+			handle_start_squid(vk, peer_id)
+			continue
+		if action == "squid_join":
+			handle_squid_join(vk, peer_id, user_id)
+			continue
+		if action == "squid_leave":
+			handle_squid_leave(vk, peer_id, user_id)
+			continue
+		if action == "squid_begin":
+			handle_squid_begin(vk, peer_id)
+			continue
+		if action == "squid_cancel":
+			handle_squid_cancel(vk, peer_id)
+			continue
+		if action == "squid_guess":
+			handle_squid_guess(vk, peer_id, user_id, payload)
+			continue
 		if action == "g_join":
 			handle_guess_join(vk, peer_id, user_id)
 			continue
@@ -1003,8 +1288,9 @@ def main() -> None:
 				"— Мафия: лобби и старт\n"
 				"— Угадай число: 2 игрока, по очереди\n"
 				"— Викторина: отвечай текстом, есть подсказка/сдаюсь\n"
+				"— Кальмар: мини-игры с элиминацией\n"
 				"— ИИ‑чат: включай кнопкой. В ЛС /admin — выбор модели ИИ (gpt-5-nano / gemini-flash-1.5-8b / deepseek-chat)\n"
-				"Команды: /start, /me, /top quiz, /top guess"
+				"Команды: /start, /me, /top quiz, /top guess, /top squid"
 			)
 			send_message(vk, peer_id, help_msg)
 			continue
