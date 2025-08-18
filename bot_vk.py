@@ -262,6 +262,8 @@ def build_main_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	keyboard.add_line()
+	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
 	return keyboard.get_keyboard()
 
 
@@ -273,7 +275,15 @@ def build_admin_keyboard() -> str:
 	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
 	keyboard.add_button("Текущая", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
 	keyboard.add_line()
+	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	keyboard.add_line()
 	keyboard.add_button("Закрыть", color=VkKeyboardColor.NEGATIVE, payload={"action": "admin_close"})
+	return keyboard.get_keyboard()
+
+
+def build_dm_info_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
 	return keyboard.get_keyboard()
 
 
@@ -506,11 +516,10 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 
 # ---------- Команды ----------
 def handle_start(vk, peer_id: int) -> None:
-	send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
 	send_message(
 		vk,
 		peer_id,
-		"Привет! Выбери игру: «Мафия», «Угадай число», либо включи «ИИ‑чат».",
+		"Привет! Выбери игру: «Мафия», «Угадай число», «Викторина», либо включи «ИИ‑чат».",
 		keyboard=build_main_keyboard(),
 	)
 
@@ -885,7 +894,6 @@ def main() -> None:
 
 		# Команды
 		if text == "/start":
-			send_message(vk, peer_id, "Старые кнопки убраны.", keyboard=build_empty_keyboard())
 			send_message(vk, peer_id, "Привет! Выбери игру или включи «ИИ‑чат».", keyboard=build_main_keyboard())
 			continue
 
@@ -974,6 +982,17 @@ def main() -> None:
 			continue
 		if action == "ai_off":
 			handle_ai_off(vk, peer_id)
+			continue
+		if action == "show_help":
+			help_msg = (
+				"Cry Cat — игры и ИИ:\n"
+				"— Мафия: лобби и старт\n"
+				"— Угадай число: 2 игрока, по очереди\n"
+				"— Викторина: отвечай текстом, есть подсказка/сдаюсь\n"
+				"— ИИ‑чат: включай кнопкой. В ЛС /admin — выбор модели ИИ (gpt-5-nano / gemini-flash-1.5-8b / deepseek-chat)\n"
+				"Команды: /start, /me, /top quiz, /top guess"
+			)
+			send_message(vk, peer_id, help_msg)
 			continue
 
 		# Админ-панель: выбор модели
