@@ -36,6 +36,20 @@ AITUNNEL_MODELS = os.getenv("AITUNNEL_MODELS", "").strip()
 # Провайдер ИИ: OPENROUTER, AITUNNEL, AUTO
 AI_PROVIDER = os.getenv("AI_PROVIDER", "AITUNNEL").strip().upper()
 
+# Администраторы (через запятую: user_id)
+def _parse_admin_ids(csv: str) -> Set[int]:
+	ids: Set[int] = set()
+	for part in (csv or "").split(","):
+		part = part.strip()
+		if part.isdigit():
+			ids.add(int(part))
+	return ids
+
+ADMIN_USER_IDS: Set[int] = _parse_admin_ids(os.getenv("ADMIN_USER_IDS", "").strip())
+
+# Текущее имя модели AITunnel (может быть изменено админом в рантайме)
+RUNTIME_AITUNNEL_MODEL: str = AITUNNEL_MODEL
+
 # ---------- Не даём Windows уснуть ----------
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
@@ -165,6 +179,18 @@ def build_main_keyboard() -> str:
 	return keyboard.get_keyboard()
 
 
+def build_admin_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
+	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
+	keyboard.add_line()
+	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
+	keyboard.add_button("Текущая", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
+	keyboard.add_line()
+	keyboard.add_button("Закрыть", color=VkKeyboardColor.NEGATIVE, payload={"action": "admin_close"})
+	return keyboard.get_keyboard()
+
+
 def build_mafia_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Присоединиться", color=VkKeyboardColor.PRIMARY, payload={"action": "maf_join"})
@@ -239,6 +265,9 @@ def get_model_candidates() -> List[str]:
 
 
 def get_aitunnel_model_candidates() -> List[str]:
+	# Приоритет ручного выбора модели админом
+	if RUNTIME_AITUNNEL_MODEL:
+		return [RUNTIME_AITUNNEL_MODEL]
 	models_csv = AITUNNEL_MODELS
 	if models_csv:
 		return [m.strip() for m in models_csv.split(",") if m.strip()]
@@ -597,6 +626,32 @@ def handle_ai_message(vk, peer_id: int, user_text: str,
 	send_message(vk, peer_id, reply)
 
 
+# ----- Админ: выбор модели AITunnel -----
+def handle_admin_panel(vk, peer_id: int, user_id: int) -> None:
+	if user_id not in ADMIN_USER_IDS:
+		return
+	send_message(vk, peer_id, "Админ‑панель: выбери модель для AITunnel.", keyboard=build_admin_keyboard())
+
+
+def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> None:
+	global RUNTIME_AITUNNEL_MODEL
+	if user_id not in ADMIN_USER_IDS:
+		return
+	model = (model_name or "").strip()
+	if not model:
+		send_message(vk, peer_id, "Модель не указана.")
+		return
+	RUNTIME_AITUNNEL_MODEL = model
+	send_message(vk, peer_id, f"OK. Текущая модель AITunnel: {RUNTIME_AITUNNEL_MODEL}", keyboard=build_admin_keyboard())
+
+
+def handle_admin_current(vk, peer_id: int, user_id: int) -> None:
+	if user_id not in ADMIN_USER_IDS:
+		return
+	current = RUNTIME_AITUNNEL_MODEL or AITUNNEL_MODEL
+	send_message(vk, peer_id, f"Текущая модель AITunnel: {current}", keyboard=build_admin_keyboard())
+
+
 # ---------- ИИ‑чат утилиты ----------
 def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
 	# ИИ включается только вручную и для ЛС, и для бесед
@@ -664,6 +719,10 @@ def main() -> None:
 		if text in {"угадай число", "угадай", "число"}:
 			handle_start_guess(vk, peer_id, user_id)
 			continue
+		# Админ-панель по команде в ЛС
+		if is_dm and text in {"/admin", "админ", "admin"}:
+			handle_admin_panel(vk, peer_id, user_id)
+			continue
 
 		action = payload.get("action") if isinstance(payload, dict) else None
 
@@ -707,6 +766,19 @@ def main() -> None:
 			continue
 		if action == "ai_off":
 			handle_ai_off(vk, peer_id)
+			continue
+
+		# Админ-панель: выбор модели
+		if action == "admin_set_model":
+			model_name = payload.get("model") if isinstance(payload, dict) else None
+			handle_admin_set_model(vk, peer_id, user_id, model_name or "")
+			continue
+		if action == "admin_current":
+			handle_admin_current(vk, peer_id, user_id)
+			continue
+		if action == "admin_close":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Админ‑панель закрыта.", keyboard=build_main_keyboard())
 			continue
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
