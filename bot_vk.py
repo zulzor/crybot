@@ -545,19 +545,25 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	for model in models_to_try:
 		for attempt in range(2):
 			try:
+				# Формируем JSON данные в зависимости от модели
+				json_data = {
+					"model": model,
+					"messages": messages,
+					"temperature": 0.6,
+					"max_tokens": 80,
+				}
+				
+				# Добавляем reasoning только для моделей, которые его поддерживают
+				if model != "gpt-5-nano":
+					json_data["reasoning"] = {"exclude": True}
+				
 				resp = requests.post(
 					AITUNNEL_API_URL,
 					headers={
 						"Authorization": f"Bearer {api_key}",
 						"Content-Type": "application/json",
 					},
-					json={
-						"model": model,
-						"messages": messages,
-						"temperature": 0.6,
-						"max_tokens": 80,
-						"reasoning": {"exclude": True},
-					},
+					json=json_data,
 					timeout=45,
 				)
 				resp.raise_for_status()
