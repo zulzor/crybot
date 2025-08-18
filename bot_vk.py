@@ -73,7 +73,7 @@ def load_config() -> Tuple[str, int, str, str, str, str]:
 	ai_provider = os.getenv("AI_PROVIDER", AI_PROVIDER).strip().upper()
 	system_prompt = (
 		os.getenv("AI_SYSTEM_PROMPT", "").strip()
-		or "Ты дружелюбный нейросотрудник сообщества Cry Cat. Отвечай кратко (до 380 символов) и по делу на русском. Если спрашивают про бота — есть игры «Мафия», «Угадай число» и режим «ИИ‑чат»."
+		or "Ты бот Cry Cat. Отвечай по-русски, дружелюбно и очень кратко (до 380 символов). При необходимости вкратце упоминай игры: Мафия, Угадай число, ИИ‑чат."
 	)
 	if not token:
 		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")
@@ -315,7 +315,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
 	for model in get_aitunnel_model_candidates():
-		for attempt in range(2):
+		for attempt in range(1):
 			try:
 				resp = requests.post(
 					AITUNNEL_API_URL,
@@ -327,7 +327,8 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"model": model,
 						"messages": messages,
 						"temperature": 0.6,
-						"max_tokens": 180,
+						"max_tokens": 120,
+						"reasoning": {"exclude": True},
 					},
 					timeout=45,
 				)
