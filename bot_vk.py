@@ -549,12 +549,16 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				json_data = {
 					"model": model,
 					"messages": messages,
-					"temperature": 0.6,
-					"max_tokens": 80,
+					"temperature": 2.0,  # Как на сайте AITunnel
+					"max_tokens": 5000,  # Как на сайте AITunnel
 				}
 				
-				# Добавляем reasoning только для моделей, которые его поддерживают
-				if model != "gpt-5-nano":
+				# Для gpt-5-nano используем параметры как на сайте
+				if model == "gpt-5-nano":
+					json_data["reasoning_tokens"] = 0
+					json_data["reasoning_depth"] = "low"
+				else:
+					# Для других моделей используем старый формат
 					json_data["reasoning"] = {"exclude": True}
 				
 				resp = requests.post(
