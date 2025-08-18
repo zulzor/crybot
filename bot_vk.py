@@ -789,6 +789,235 @@ def cleanup_old_incidents(days: int = 30) -> int:
 	
 	return len(old_incidents)
 
+
+# ---------- Космический Бизнес (Business Empire) ----------
+@dataclass
+class BusinessAsset:
+	name: str
+	price: int
+	income_per_hour: int
+	level: int = 1
+	max_level: int = 10
+	upgrade_cost_multiplier: float = 1.5
+
+@dataclass
+class BusinessProfile:
+	user_id: int
+	money: int = 100  # Начинаем с 100 монет
+	assets: Dict[str, BusinessAsset] = field(default_factory=dict)
+	last_income_time: float = 0
+	total_earned: int = 0
+	prestige_level: int = 1
+	prestige_points: int = 0
+
+# База бизнес-профилей
+BUSINESS_PROFILES: Dict[int, BusinessProfile] = {}
+
+# Доступные активы для покупки
+BUSINESS_ASSETS = {
+	"apple_stand": BusinessAsset("🍎 Яблочный лоток", 50, 5, upgrade_cost_multiplier=1.3),
+	"fruit_shop": BusinessAsset("🍊 Фруктовый магазин", 200, 25, upgrade_cost_multiplier=1.4),
+	"supermarket": BusinessAsset("🛒 Супермаркет", 1000, 150, upgrade_cost_multiplier=1.5),
+	"mall": BusinessAsset("🏬 Торговый центр", 5000, 800, upgrade_cost_multiplier=1.6),
+	"corporation": BusinessAsset("🏢 Корпорация", 25000, 5000, upgrade_cost_multiplier=1.7),
+	"bank": BusinessAsset("🏦 Банк", 100000, 25000, upgrade_cost_multiplier=1.8),
+	"country": BusinessAsset("🌍 Страна", 1000000, 500000, upgrade_cost_multiplier=1.9),
+	"planet": BusinessAsset("🪐 Планета", 10000000, 10000000, upgrade_cost_multiplier=2.0),
+	"star_system": BusinessAsset("⭐ Звёздная система", 100000000, 100000000, upgrade_cost_multiplier=2.1),
+	"galaxy": BusinessAsset("🌌 Галактика", 1000000000, 1000000000, upgrade_cost_multiplier=2.2),
+	"universe": BusinessAsset("🌌 Вселенная", 10000000000, 10000000000, upgrade_cost_multiplier=2.5)
+}
+
+# Престиж уровни
+PRESTIGE_LEVELS = {
+	1: {"name": "Начинающий торговец", "multiplier": 1.0},
+	2: {"name": "Мелкий бизнесмен", "multiplier": 1.2},
+	3: {"name": "Предприниматель", "multiplier": 1.5},
+	4: {"name": "Магнат", "multiplier": 2.0},
+	5: {"name": "Олигарх", "multiplier": 3.0},
+	6: {"name": "Империалист", "multiplier": 5.0},
+	7: {"name": "Космический лорд", "multiplier": 10.0},
+	8: {"name": "Повелитель галактик", "multiplier": 25.0},
+	9: {"name": "Властелин вселенных", "multiplier": 100.0},
+	10: {"name": "Бог бизнеса", "multiplier": 1000.0}
+}
+
+
+def get_business_profile(user_id: int) -> BusinessProfile:
+	"""Получить или создать бизнес-профиль пользователя"""
+	if user_id not in BUSINESS_PROFILES:
+		BUSINESS_PROFILES[user_id] = BusinessProfile(user_id=user_id)
+	return BUSINESS_PROFILES[user_id]
+
+
+def calculate_income(profile: BusinessProfile) -> int:
+	"""Рассчитывает доход от всех активов"""
+	total_income = 0
+	current_time = time.time()
+	
+	for asset in profile.assets.values():
+		# Доход зависит от уровня актива и престижа
+		prestige_multiplier = PRESTIGE_LEVELS[profile.prestige_level]["multiplier"]
+		asset_income = asset.income_per_hour * asset.level * prestige_multiplier
+		total_income += asset_income
+	
+	return int(total_income)
+
+
+def collect_income(user_id: int) -> str:
+	"""Собирает накопленный доход"""
+	profile = get_business_profile(user_id)
+	current_time = time.time()
+	
+	# Рассчитываем время с последнего сбора
+	time_diff = current_time - profile.last_income_time
+	hours_passed = time_diff / 3600
+	
+	if hours_passed < 0.1:  # Минимум 6 минут между сборами
+		return "⏰ Подождите немного перед следующим сбором дохода"
+	
+	# Рассчитываем доход
+	hourly_income = calculate_income(profile)
+	income = int(hourly_income * hours_passed)
+	
+	if income <= 0:
+		return "💰 У вас пока нет активов для получения дохода"
+	
+	# Обновляем профиль
+	profile.money += income
+	profile.total_earned += income
+	profile.last_income_time = current_time
+	
+	return f"💰 Собрано {income} монет! Баланс: {profile.money}"
+
+
+def buy_asset(user_id: int, asset_key: str) -> str:
+	"""Покупает актив"""
+	profile = get_business_profile(user_id)
+	
+	if asset_key not in BUSINESS_ASSETS:
+		return "❌ Актив не найден"
+	
+	asset_template = BUSINESS_ASSETS[asset_key]
+	
+	# Проверяем, есть ли уже этот актив
+	if asset_key in profile.assets:
+		return "❌ У вас уже есть этот актив"
+	
+	# Проверяем деньги
+	if profile.money < asset_template.price:
+		return f"❌ Недостаточно денег. Нужно: {asset_template.price}, у вас: {profile.money}"
+	
+	# Покупаем актив
+	profile.money -= asset_template.price
+	profile.assets[asset_key] = BusinessAsset(
+		name=asset_template.name,
+		price=asset_template.price,
+		income_per_hour=asset_template.income_per_hour,
+		level=1,
+		max_level=asset_template.max_level,
+		upgrade_cost_multiplier=asset_template.upgrade_cost_multiplier
+	)
+	
+	return f"✅ Куплен {asset_template.name} за {asset_template.price} монет!"
+
+
+def upgrade_asset(user_id: int, asset_key: str) -> str:
+	"""Улучшает актив"""
+	profile = get_business_profile(user_id)
+	
+	if asset_key not in profile.assets:
+		return "❌ У вас нет этого актива"
+	
+	asset = profile.assets[asset_key]
+	
+	if asset.level >= asset.max_level:
+		return "❌ Актив уже максимального уровня"
+	
+	# Рассчитываем стоимость улучшения
+	upgrade_cost = int(asset.price * asset.upgrade_cost_multiplier * asset.level)
+	
+	if profile.money < upgrade_cost:
+		return f"❌ Недостаточно денег для улучшения. Нужно: {upgrade_cost}"
+	
+	# Улучшаем актив
+	profile.money -= upgrade_cost
+	asset.level += 1
+	asset.income_per_hour = int(asset.income_per_hour * 1.5)
+	
+	return f"✅ {asset.name} улучшен до уровня {asset.level}! Доход: {asset.income_per_hour}"
+
+
+def prestige_reset(user_id: int) -> str:
+	"""Престиж-рестарт для получения множителя"""
+	profile = get_business_profile(user_id)
+	
+	# Требования для престижа
+	min_total_earned = 1000000  # Минимум 1M заработать
+	min_assets = 5  # Минимум 5 активов
+	
+	if profile.total_earned < min_total_earned:
+		return f"❌ Для престижа нужно заработать минимум {min_total_earned} монет"
+	
+	if len(profile.assets) < min_assets:
+		return f"❌ Для престижа нужно минимум {min_assets} активов"
+	
+	# Рассчитываем престиж-очки
+	prestige_points = profile.total_earned // 1000000
+	
+	# Престиж-рестарт
+	profile.prestige_level += 1
+	profile.prestige_points += prestige_points
+	profile.money = 1000  # Начинаем с 1000 монет
+	profile.assets.clear()
+	profile.last_income_time = time.time()
+	profile.total_earned = 0
+	
+	prestige_info = PRESTIGE_LEVELS.get(profile.prestige_level, {"name": "Неизвестно", "multiplier": 1.0})
+	
+	return f"🌟 Престиж! Новый уровень: {prestige_info['name']} (x{prestige_info['multiplier']})"
+
+
+def get_business_status(user_id: int) -> str:
+	"""Получить статус бизнеса пользователя"""
+	profile = get_business_profile(user_id)
+	prestige_info = PRESTIGE_LEVELS[profile.prestige_level]
+	
+	status = f"🏢 Бизнес-империя {mention(user_id, 'игрока')}\n\n"
+	status += f"💰 Баланс: {profile.money} монет\n"
+	status += f"🌟 Престиж: {prestige_info['name']} (x{prestige_info['multiplier']})\n"
+	status += f"📈 Всего заработано: {profile.total_earned} монет\n"
+	status += f"⏰ Доход в час: {calculate_income(profile)} монет\n\n"
+	
+	if profile.assets:
+		status += "🏪 Ваши активы:\n"
+		for asset_key, asset in profile.assets.items():
+			status += f"• {asset.name} (Ур.{asset.level}) - {asset.income_per_hour} монет/час\n"
+	else:
+		status += "❌ У вас пока нет активов"
+	
+	return status
+
+
+def get_business_shop() -> str:
+	"""Показывает магазин активов"""
+	shop = "🏪 Магазин активов:\n\n"
+	
+	for asset_key, asset in BUSINESS_ASSETS.items():
+		shop += f"• {asset.name}\n"
+		shop += f"  💰 Цена: {asset.price} монет\n"
+		shop += f"  📈 Доход: {asset.income_per_hour} монет/час\n"
+		shop += f"  🔧 Уровни: 1-{asset.max_level}\n\n"
+	
+	shop += "💡 Команды:\n"
+	shop += "• /buy [ключ] - купить актив\n"
+	shop += "• /upgrade [ключ] - улучшить актив\n"
+	shop += "• /collect - собрать доход\n"
+	shop += "• /prestige - престиж-рестарт\n"
+	shop += "• /business - статус бизнеса"
+	
+	return shop
+
 # ---------- Викторина состояния ----------
 @dataclass
 class QuizState:
@@ -841,10 +1070,13 @@ SQUID_GAMES: Dict[int, SquidGameSession] = {}
 # ---------- Клавиатуры ----------
 def build_main_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	keyboard.add_button("Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
-	keyboard.add_button("Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
-	keyboard.add_button("Викторина", color=VkKeyboardColor.SECONDARY, payload={"action": "start_quiz"})
-	keyboard.add_button("Кальмар", color=VkKeyboardColor.PRIMARY, payload={"action": "start_squid"})
+	keyboard.add_button("🎭 Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
+	keyboard.add_button("🔢 Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
+	keyboard.add_line()
+	keyboard.add_button("❓ Викторина", color=VkKeyboardColor.SECONDARY, payload={"action": "start_quiz"})
+	keyboard.add_button("🦑 Кальмар", color=VkKeyboardColor.PRIMARY, payload={"action": "start_squid"})
+	keyboard.add_line()
+	keyboard.add_button("🏢 Космический Бизнес", color=VkKeyboardColor.POSITIVE, payload={"action": "start_business"})
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
@@ -920,6 +1152,58 @@ def build_moderation_keyboard() -> str:
 	keyboard.add_button("📊 Статистика", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_mod_stats"})
 	keyboard.add_line()
 	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
+	return keyboard.get_keyboard()
+
+
+def build_business_keyboard() -> str:
+	"""Клавиатура для бизнес-игры"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("💰 Собрать доход", color=VkKeyboardColor.POSITIVE, payload={"action": "business_collect"})
+	keyboard.add_button("🏪 Магазин", color=VkKeyboardColor.PRIMARY, payload={"action": "business_shop"})
+	keyboard.add_line()
+	keyboard.add_button("📊 Статус", color=VkKeyboardColor.PRIMARY, payload={"action": "business_status"})
+	keyboard.add_button("🔧 Улучшить", color=VkKeyboardColor.PRIMARY, payload={"action": "business_upgrade"})
+	keyboard.add_line()
+	keyboard.add_button("🌟 Престиж", color=VkKeyboardColor.SECONDARY, payload={"action": "business_prestige"})
+	keyboard.add_button("🏆 Топ", color=VkKeyboardColor.SECONDARY, payload={"action": "business_top"})
+	keyboard.add_line()
+	keyboard.add_button("← Назад", color=VkKeyboardColor.NEGATIVE, payload={"action": "show_main_menu"})
+	return keyboard.get_keyboard()
+
+
+def build_business_shop_keyboard() -> str:
+	"""Клавиатура магазина активов"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	
+	# Первый ряд - дешёвые активы
+	keyboard.add_button("🍎 Яблочный лоток", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_asset", "asset": "apple_stand"})
+	keyboard.add_button("🍊 Фруктовый магазин", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_asset", "asset": "fruit_shop"})
+	keyboard.add_line()
+	
+	# Второй ряд - средние активы
+	keyboard.add_button("🛒 Супермаркет", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_asset", "asset": "supermarket"})
+	keyboard.add_button("🏬 Торговый центр", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_asset", "asset": "mall"})
+	keyboard.add_line()
+	
+	# Третий ряд - дорогие активы
+	keyboard.add_button("🏢 Корпорация", color=VkKeyboardColor.SECONDARY, payload={"action": "buy_asset", "asset": "corporation"})
+	keyboard.add_button("🏦 Банк", color=VkKeyboardColor.SECONDARY, payload={"action": "buy_asset", "asset": "bank"})
+	keyboard.add_line()
+	
+	# Четвёртый ряд - космические активы
+	keyboard.add_button("🌍 Страна", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "country"})
+	keyboard.add_button("🪐 Планета", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "planet"})
+	keyboard.add_line()
+	
+	# Пятый ряд - галактические активы
+	keyboard.add_button("⭐ Звёздная система", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "star_system"})
+	keyboard.add_button("🌌 Галактика", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "galaxy"})
+	keyboard.add_line()
+	
+	# Последний ряд
+	keyboard.add_button("🌌 Вселенная", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "universe"})
+	keyboard.add_line()
+	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "business_back"})
 	return keyboard.get_keyboard()
 
 
@@ -1863,11 +2147,18 @@ def main() -> None:
 			
 			prof = get_profile(vk, user_id)
 			s = prof.stats
+			
+			# Добавляем статистику бизнеса
+			business_prof = get_business_profile(user_id)
+			business_income = calculate_income(business_prof)
+			
 			msg = (
 				f"Профиль {mention(user_id, prof.name or 'игрок')}:\n"
 				f"Викторина очков: {s.get('quiz_points', 0)}\n"
 				f"Угадай число побед: {s.get('guess_wins', 0)}\n"
 				f"Кальмар побед: {s.get('squid_wins', 0)}\n"
+				f"🏢 Бизнес доход: {business_income} монет/час\n"
+				f"🌟 Престиж: {PRESTIGE_LEVELS[business_prof.prestige_level]['name']}\n"
 				f"✅ Политика конфиденциальности: принята\n"
 				f"✅ GDPR согласие: принято"
 			)
@@ -1924,6 +2215,37 @@ def main() -> None:
 				status_msg += f"📊 Подозрительных действий: {len(activity.suspicious_actions)}"
 			
 			send_message(vk, peer_id, status_msg)
+			continue
+		
+		# Команды бизнес-игры
+		if text in {"/business", "бизнес", "business"}:
+			send_message(vk, peer_id, get_business_status(user_id), keyboard=build_business_keyboard())
+			continue
+		
+		if text in {"/shop", "магазин", "shop"}:
+			send_message(vk, peer_id, get_business_shop(), keyboard=build_business_shop_keyboard())
+			continue
+		
+		if text in {"/collect", "собрать", "collect"}:
+			result = collect_income(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text.startswith("/buy "):
+			asset_key = text.split(" ", 1)[1]
+			result = buy_asset(user_id, asset_key)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text.startswith("/upgrade "):
+			asset_key = text.split(" ", 1)[1]
+			result = upgrade_asset(user_id, asset_key)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text in {"/prestige", "престиж", "prestige"}:
+			result = prestige_reset(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		# Админ-панель по команде в ЛС
 		if is_dm and text in {"/admin", "админ", "admin"}:
@@ -2046,6 +2368,82 @@ def main() -> None:
 		if action == "decline_privacy":
 			track_user_activity(user_id, "decline_privacy", "privacy_declined")
 			send_message(vk, peer_id, "❌ Без принятия политики конфиденциальности использование бота невозможно.", keyboard=build_privacy_consent_keyboard())
+			continue
+		
+		# Бизнес-игра действия
+		if action == "start_business":
+			send_message(vk, peer_id, "🏢 Добро пожаловать в Космический Бизнес!\n\nНачните с продажи яблок и постройте империю до галактик!", keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_collect":
+			result = collect_income(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_shop":
+			send_message(vk, peer_id, get_business_shop(), keyboard=build_business_shop_keyboard())
+			continue
+		
+		if action == "business_status":
+			send_message(vk, peer_id, get_business_status(user_id), keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_upgrade":
+			# Показываем список активов для улучшения
+			profile = get_business_profile(user_id)
+			if not profile.assets:
+				send_message(vk, peer_id, "❌ У вас нет активов для улучшения", keyboard=build_business_keyboard())
+				continue
+			
+			upgrade_msg = "🔧 Выберите актив для улучшения:\n\n"
+			for asset_key, asset in profile.assets.items():
+				upgrade_cost = int(asset.price * asset.upgrade_cost_multiplier * asset.level)
+				upgrade_msg += f"• {asset.name} (Ур.{asset.level}) - улучшение за {upgrade_cost} монет\n"
+			
+			upgrade_msg += "\n💡 Используйте: /upgrade [ключ]"
+			send_message(vk, peer_id, upgrade_msg, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_prestige":
+			result = prestige_reset(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_top":
+			# Показываем топ игроков по доходам
+			top_players = []
+			for uid, prof in BUSINESS_PROFILES.items():
+				income = calculate_income(prof)
+				top_players.append((uid, income, prof.prestige_level))
+			
+			top_players.sort(key=lambda x: x[1], reverse=True)
+			
+			if not top_players:
+				send_message(vk, peer_id, "🏆 Пока нет игроков в бизнесе", keyboard=build_business_keyboard())
+				continue
+			
+			top_msg = "🏆 Топ бизнесменов:\n\n"
+			for i, (uid, income, prestige) in enumerate(top_players[:10], 1):
+				name = PROFILES.get(uid, UserProfile(uid)).name or "игрок"
+				prestige_name = PRESTIGE_LEVELS.get(prestige, {}).get("name", "Неизвестно")
+				top_msg += f"{i}. {mention(uid, name)} - {income} монет/час ({prestige_name})\n"
+			
+			send_message(vk, peer_id, top_msg, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "buy_asset":
+			asset_key = payload.get("asset", "")
+			if asset_key:
+				result = buy_asset(user_id, asset_key)
+				send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_back":
+			send_message(vk, peer_id, "🏢 Главное меню бизнеса", keyboard=build_business_keyboard())
+			continue
+		
+		if action == "show_main_menu":
+			send_message(vk, peer_id, "🎮 Главное меню", keyboard=build_main_keyboard())
 			continue
 		
 		# Отслеживание активности для всех действий
