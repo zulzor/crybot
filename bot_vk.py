@@ -456,7 +456,7 @@ def handle_mafia_cancel(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_mafia_begin(vk, peer_id: int, user_id: int) -> None:
-	lobby = LOBБIES.get(peer_id)
+	lobby = LOBBIES.get(peer_id)
 	if not lobby:
 		send_message(vk, peer_id, "Лобби не найдено.")
 		return
@@ -473,8 +473,8 @@ def handle_mafia_begin(vk, peer_id: int, user_id: int) -> None:
 
 # ----- Угадай число -----
 def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
-	if peer_id in GUESS_SEССIONS:
-		sess = GUESS_SEССIONS[peer_id]
+	if peer_id in GUESS_SESSIONS:
+		sess = GUESS_SESSIONS[peer_id]
 		text = (
 			"Лобби «Угадай число». Участники: "
 			+ format_players(vk, sess.joined_ids)
@@ -484,7 +484,7 @@ def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
 		return
 	sess = GuessNumberSession(creator_id=user_id)
 	sess.add_player(user_id)
-	GUESS_SEССIONS[peer_id] = sess
+	GUESS_SESSIONS[peer_id] = sess
 	text = (
 		f"Создано лобби «Угадай число» создателем {mention(user_id)}.\n"
 		f"Игроки: {format_players(vk, sess.joined_ids)}\n"
@@ -494,7 +494,7 @@ def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_join(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SEССIONS.get(peer_id)
+	sess = GUESS_SESSIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби ещё не создано. Нажмите «Угадай число».", keyboard=build_main_keyboard())
 		return
@@ -509,32 +509,32 @@ def handle_guess_join(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_leave(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SEССIONS.get(peer_id)
+	sess = GUESS_SESSIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби ещё не создано.")
 		return
 	sess.remove_player(user_id)
 	if not sess.joined_ids:
-		GUESS_SEССIONS.pop(peer_id, None)
+		GUESS_SESSIONS.pop(peer_id, None)
 		send_message(vk, peer_id, "Лобби закрыто: игроков не осталось.", keyboard=build_main_keyboard())
 		return
 	send_message(vk, peer_id, f"{mention(user_id)} вышел.\nИгроки: {format_players(vk, sess.joined_ids)}", keyboard=build_guess_keyboard())
 
 
 def handle_guess_cancel(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SEССIONS.get(peer_id)
+	sess = GUESS_SESSIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби уже отсутствует.")
 		return
 	if user_id != sess.creator_id:
 		send_message(vk, peer_id, "Отменить может только создатель лобби.")
 		return
-	GUESS_SEССIONS.pop(peer_id, None)
+	GUESS_SESSIONS.pop(peer_id, None)
 	send_message(vk, peer_id, "Лобби «Угадай число» отменено.", keyboard=build_main_keyboard())
 
 
 def handle_guess_begin(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SEССIONS.get(peer_id)
+	sess = GUESS_SESSIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби не найдено.")
 		return
@@ -554,7 +554,7 @@ def handle_guess_begin(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> None:
-	sess = GUESS_SEССIONS.get(peer_id)
+	sess = GUESS_SESSIONS.get(peer_id)
 	if not sess or not sess.started:
 		return
 	if user_id not in sess.player_order:
@@ -571,7 +571,7 @@ def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> No
 			f"Попытки: {', '.join(f'{mention(pid)}: {sess.attempts.get(pid,0)}' for pid in sess.player_order)}"
 		)
 		send_message(vk, peer_id, msg, keyboard=build_main_keyboard())
-		GUESS_SEССIONS.pop(peer_id, None)
+		GUESS_SESSIONS.pop(peer_id, None)
 		return
 
 	if guess_value < sess.secret_number:
@@ -714,10 +714,10 @@ def main() -> None:
 			continue
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
-		if peer_id in GUESS_SEССIONS and GUESS_SEССIONS[peer_id].started:
+		if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
 			if text.isdigit():
 				guess = int(text)
-				sess = GUESS_SEССIONS[peer_id]
+				sess = GUESS_SESSIONS[peer_id]
 				if sess.min_value <= guess <= sess.max_value:
 					handle_guess_attempt(vk, peer_id, user_id, guess)
 					continue
