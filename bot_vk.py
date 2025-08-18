@@ -24,7 +24,7 @@ load_dotenv()
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "deepseek/deepseek-chat-v3-0324:free,deepseek/deepseek-r1-0528:free,qwen/qwen3-coder:free,deepseek/deepseek-r1:free").strip()
-MAX_HISTORY_MESSAGES = 2
+MAX_HISTORY_MESSAGES = 8
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
@@ -496,7 +496,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"temperature": 0.6,
 						"max_tokens": 80,
 					},
-					timeout=45,
+					timeout=60,  # Увеличиваем timeout для стабильности
 				)
 				resp.raise_for_status()
 				data = resp.json()
@@ -523,6 +523,12 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				last_err = str(e)
 				break
 		logger.info(f"AI fallback: {last_err} on model={model}")
+	
+	# Если все модели OpenRouter недоступны, пробуем AITunnel как fallback
+	if aitunnel_key and AITUNNEL_API_URL:
+		logger.info("Trying AITunnel as fallback...")
+		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
+	
 	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
 
 
@@ -539,8 +545,16 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
 	
-	# Используем runtime модель или fallback на список
-	models_to_try = [RUNTIME_AITUNNEL_MODEL] if RUNTIME_AITUNNEL_MODEL else get_aitunnel_model_candidates()
+		# Умный выбор модели: сначала runtime, потом по стоимости
+	models_to_try = []
+	if RUNTIME_AITUNNEL_MODEL:
+		models_to_try.append(RUNTIME_AITUNNEL_MODEL)
+	
+	# Добавляем остальные модели по стоимости (от дешёвых к дорогим)
+	fallback_models = get_aitunnel_model_candidates()
+	for model in fallback_models:
+		if model not in models_to_try:
+			models_to_try.append(model)
 	
 	for model in models_to_try:
 		for attempt in range(2):
@@ -553,12 +567,14 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					"max_tokens": 5000,  # Как на сайте AITunnel
 				}
 				
-				# Для gpt-5-nano используем параметры как на сайте
+				# Для gpt-5-nano используем оптимизированные параметры
 				if model == "gpt-5-nano":
-					json_data["reasoning_tokens"] = 0
+					json_data["max_tokens"] = 200  # Ограничиваем для экономии
+					json_data["reasoning_tokens"] = 50  # Ограничиваем reasoning
 					json_data["reasoning_depth"] = "low"
 				else:
-					# Для других моделей используем старый формат
+					# Для других моделей используем стандартные параметры
+					json_data["max_tokens"] = 5000
 					json_data["reasoning"] = {"exclude": True}
 				
 				resp = requests.post(
@@ -568,7 +584,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"Content-Type": "application/json",
 					},
 					json=json_data,
-					timeout=45,
+					timeout=60,  # Увеличиваем timeout для стабильности
 				)
 				resp.raise_for_status()
 				data = resp.json()
