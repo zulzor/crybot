@@ -17,6 +17,29 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 
+# ---------- Система ролей и привилегий ----------
+class UserRole(Enum):
+	USER = "user"
+	EDITOR = "editor"      # Может редактировать контент
+	MODERATOR = "moderator" # Может модерировать чат
+	ADMIN = "admin"        # Полный доступ
+	SUPER_ADMIN = "super_admin" # Создатель бота
+
+# Привилегии для каждой роли
+ROLE_PRIVILEGES = {
+	UserRole.USER: set(),
+	UserRole.EDITOR: {"edit_content", "view_stats"},
+	UserRole.MODERATOR: {"edit_content", "view_stats", "warn_users", "delete_messages", "kick_users"},
+	UserRole.ADMIN: {"edit_content", "view_stats", "warn_users", "delete_messages", "kick_users", "ban_users", "manage_roles", "ai_control"},
+	UserRole.SUPER_ADMIN: {"*"}  # Все привилегии
+}
+
+# Роли пользователей (user_id -> role)
+USER_ROLES: Dict[int, UserRole] = {}
+
+# 2FA коды для админов (user_id -> {"code": "123456", "expires": timestamp})
+ADMIN_2FA_CODES: Dict[int, Dict] = {}
+
 # Ранний загрузчик .env до чтения переменных окружения в константах ниже
 load_dotenv()
 
@@ -286,6 +309,159 @@ def accept_gdpr_consent(user_id: int) -> None:
 		prof.gdpr_consent_at = datetime.now().isoformat()
 		save_profiles()
 
+
+# ---------- Система ролей и привилегий ----------
+def get_user_role(user_id: int) -> UserRole:
+	"""Получить роль пользователя"""
+	return USER_ROLES.get(user_id, UserRole.USER)
+
+
+def has_privilege(user_id: int, privilege: str) -> bool:
+	"""Проверить, есть ли у пользователя привилегия"""
+	role = get_user_role(user_id)
+	if role == UserRole.SUPER_ADMIN:
+		return True
+	return privilege in ROLE_PRIVILEGES.get(role, set())
+
+
+def set_user_role(user_id: int, role: UserRole) -> None:
+	"""Установить роль пользователя (только для админов)"""
+	USER_ROLES[user_id] = role
+
+
+def generate_2fa_code(user_id: int) -> str:
+	"""Генерирует 6-значный код для 2FA"""
+	code = str(random.randint(100000, 999999))
+	expires = time.time() + 300  # 5 минут
+	ADMIN_2FA_CODES[user_id] = {"code": code, "expires": time.time() + 300}
+	return code
+
+
+def verify_2fa_code(user_id: int, code: str) -> bool:
+	"""Проверяет 2FA код"""
+	if user_id not in ADMIN_2FA_CODES:
+		return False
+	
+	code_data = ADMIN_2FA_CODES[user_id]
+	if time.time() > code_data["expires"]:
+		del ADMIN_2FA_CODES[user_id]
+		return False
+	
+	if code_data["code"] == code:
+		del ADMIN_2FA_CODES[user_id]
+		return True
+	
+	return False
+
+
+def require_2fa_for_admin(user_id: int, action: str) -> bool:
+	"""Требует 2FA для критических админ-действий"""
+	critical_actions = {"manage_roles", "ban_users", "delete_messages", "kick_users"}
+	return action in critical_actions and has_privilege(user_id, "admin")
+
+
+# ---------- Система мониторинга активности ----------
+@dataclass
+class UserActivity:
+	user_id: int
+	last_action: str = ""
+	last_action_time: float = 0
+	action_count: int = 0
+	suspicious_actions: List[str] = field(default_factory=list)
+	warnings: int = 0
+	last_warning_time: float = 0
+
+# Отслеживание активности пользователей
+USER_ACTIVITY: Dict[int, UserActivity] = {}
+
+# Подозрительные паттерны
+SUSPICIOUS_PATTERNS = [
+	"spam",           # Спам сообщения
+	"flood",          # Флуд
+	"inappropriate",  # Неподобающий контент
+	"bot_abuse",      # Злоупотребление ботом
+	"admin_impersonation"  # Подделка админа
+]
+
+
+def track_user_activity(user_id: int, action: str, context: str = "") -> None:
+	"""Отслеживает активность пользователя"""
+	if user_id not in USER_ACTIVITY:
+		USER_ACTIVITY[user_id] = UserActivity(user_id=user_id)
+	
+	activity = USER_ACTIVITY[user_id]
+	current_time = time.time()
+	
+	# Обновляем статистику
+	activity.last_action = action
+	activity.last_action_time = current_time
+	activity.action_count += 1
+	
+	# Проверяем на подозрительную активность
+	if _is_suspicious_action(user_id, action, context):
+		activity.suspicious_actions.append(f"{action}:{context}:{current_time}")
+		logger.warning(f"Suspicious activity detected: user={user_id}, action={action}, context={context}")
+
+
+def _is_suspicious_action(user_id: int, action: str, context: str) -> bool:
+	"""Определяет, является ли действие подозрительным"""
+	activity = USER_ACTIVITY.get(user_id)
+	if not activity:
+		return False
+	
+	current_time = time.time()
+	
+	# Спам: много действий за короткое время
+	if current_time - activity.last_action_time < 1 and activity.action_count > 10:
+		return True
+	
+	# Флуд: повторяющиеся действия
+	if len(activity.suspicious_actions) > 5:
+		recent_actions = [a for a in activity.suspicious_actions if current_time - float(a.split(":")[-1]) < 60]
+		if len(recent_actions) > 10:
+			return True
+	
+	return False
+
+
+def warn_user(user_id: int, reason: str, moderator_id: int) -> str:
+	"""Выносит предупреждение пользователю"""
+	if not has_privilege(moderator_id, "warn_users"):
+		return "❌ У вас нет прав для вынесения предупреждений"
+	
+	activity = USER_ACTIVITY.get(user_id)
+	if not activity:
+		activity = UserActivity(user_id=user_id)
+		USER_ACTIVITY[user_id] = activity
+	
+	current_time = time.time()
+	activity.warnings += 1
+	activity.last_warning_time = current_time
+	
+	# Автоматические действия при предупреждениях
+	if activity.warnings >= 3:
+		# Временный бан на 1 час
+		return f"⚠️ Пользователь {user_id} получил 3 предупреждения. Автоматический бан на 1 час."
+	elif activity.warnings >= 2:
+		return f"⚠️ Пользователь {user_id} получил 2-е предупреждение. Следующее = бан."
+	else:
+		return f"⚠️ Пользователь {user_id} получил предупреждение: {reason}"
+
+
+def get_user_activity_report(user_id: int) -> str:
+	"""Получить отчёт об активности пользователя"""
+	activity = USER_ACTIVITY.get(user_id)
+	if not activity:
+		return "Активность не найдена"
+	
+	return (
+		f"📊 Активность пользователя {user_id}:\n"
+		f"Действий: {activity.action_count}\n"
+		f"Последнее: {activity.last_action}\n"
+		f"Предупреждений: {activity.warnings}\n"
+		f"Подозрительных действий: {len(activity.suspicious_actions)}"
+	)
+
 # ---------- Викторина состояния ----------
 @dataclass
 class QuizState:
@@ -352,13 +528,35 @@ def build_main_keyboard() -> str:
 
 def build_admin_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	# AITunnel модели (только 3)
+	
+	# AI модели
+	keyboard.add_button("🤖 AI модели", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_ai_models"})
+	keyboard.add_line()
+	
+	# Управление пользователями
+	keyboard.add_button("👥 Пользователи", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_users"})
+	keyboard.add_line()
+	
+	# Модерация
+	keyboard.add_button("🛡️ Модерация", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_moderation"})
+	keyboard.add_line()
+	
+	# Система
+	keyboard.add_button("⚙️ Система", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_system"})
+	keyboard.add_line()
+	
+	keyboard.add_button("Закрыть", color=VkKeyboardColor.NEGATIVE, payload={"action": "admin_close"})
+	return keyboard.get_keyboard()
+
+
+def build_ai_models_keyboard() -> str:
+	"""Клавиатура для выбора AI моделей"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
 	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
 	keyboard.add_line()
 	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
 	keyboard.add_line()
-	# OpenRouter модели (все остальные)
 	keyboard.add_button("deepseek-chat-v3", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-chat-v3-0324:free"})
 	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
 	keyboard.add_line()
@@ -367,11 +565,34 @@ def build_admin_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("deepseek-r1", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek-r1"})
 	keyboard.add_line()
-	keyboard.add_button("Текущая", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
+	keyboard.add_button("Текущая модель", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
+	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
+	return keyboard.get_keyboard()
+
+
+def build_users_management_keyboard() -> str:
+	"""Клавиатура для управления пользователями"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("👤 Назначить роль", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_role"})
+	keyboard.add_button("📊 Активность", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_user_activity"})
 	keyboard.add_line()
-	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	keyboard.add_button("⚠️ Предупреждение", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_warn_user"})
+	keyboard.add_button("🚫 Бан", color=VkKeyboardColor.NEGATIVE, payload={"action": "admin_ban_user"})
 	keyboard.add_line()
-	keyboard.add_button("Закрыть", color=VkKeyboardColor.NEGATIVE, payload={"action": "admin_close"})
+	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
+	return keyboard.get_keyboard()
+
+
+def build_moderation_keyboard() -> str:
+	"""Клавиатура для модерации"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("🔍 Проверить чат", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_scan_chat"})
+	keyboard.add_button("📝 Логи", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_view_logs"})
+	keyboard.add_line()
+	keyboard.add_button("🧹 Очистить спам", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_clean_spam"})
+	keyboard.add_button("📊 Статистика", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_mod_stats"})
+	keyboard.add_line()
+	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
 	return keyboard.get_keyboard()
 
 
@@ -1446,16 +1667,22 @@ def main() -> None:
 		
 		# Обработка согласий на конфиденциальность
 		if action == "accept_privacy":
+			track_user_activity(user_id, "accept_privacy", "privacy_consent")
 			accept_privacy_policy(user_id)
 			send_message(vk, peer_id, "✅ Политика конфиденциальности принята!", keyboard=build_main_keyboard())
 			continue
 		if action == "accept_gdpr":
+			track_user_activity(user_id, "accept_gdpr", "gdpr_consent")
 			accept_gdpr_consent(user_id)
 			send_message(vk, peer_id, "✅ Согласие на обработку персональных данных принято!", keyboard=build_main_keyboard())
 			continue
 		if action == "decline_privacy":
+			track_user_activity(user_id, "decline_privacy", "privacy_declined")
 			send_message(vk, peer_id, "❌ Без принятия политики конфиденциальности использование бота невозможно.", keyboard=build_privacy_consent_keyboard())
 			continue
+		
+		# Отслеживание активности для всех действий
+		track_user_activity(user_id, action or "message", text[:50])
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
 		if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
