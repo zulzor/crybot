@@ -51,6 +51,12 @@ ADMIN_USER_IDS: Set[int] = _parse_admin_ids(os.getenv("ADMIN_USER_IDS", "").stri
 # Текущее имя модели AITunnel (может быть изменено админом в рантайме)
 RUNTIME_AITUNNEL_MODEL: str = AITUNNEL_MODEL
 
+# Текущий провайдер ИИ (может быть изменён админом в рантайме)
+RUNTIME_AI_PROVIDER: str = AI_PROVIDER
+
+# Текущая модель OpenRouter (может быть изменена админом в рантайме)
+RUNTIME_OPENROUTER_MODEL: str = DEEPSEEK_MODEL
+
 # ---------- Не даём Windows уснуть ----------
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
@@ -299,10 +305,20 @@ def build_main_keyboard() -> str:
 
 def build_admin_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
+	# AITunnel модели
 	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
 	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
 	keyboard.add_line()
 	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
+	keyboard.add_button("deepseek-r1", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-r1"})
+	keyboard.add_line()
+	# OpenRouter модели
+	keyboard.add_button("deepseek-chat-v3", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-chat-v3-0324:free"})
+	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
+	keyboard.add_line()
+	keyboard.add_button("qwen3-coder", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "qwen/qwen3-coder:free"})
+	keyboard.add_button("deepseek-r1-free", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1:free"})
+	keyboard.add_line()
 	keyboard.add_button("Текущая", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
 	keyboard.add_line()
 	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
@@ -458,7 +474,11 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
-	for model in get_model_candidates():
+	
+	# Используем runtime модель или fallback на список
+	models_to_try = [RUNTIME_OPENROUTER_MODEL] if RUNTIME_OPENROUTER_MODEL else get_model_candidates()
+	
+	for model in models_to_try:
 		for attempt in range(2):  # до 2 попыток на модель
 			try:
 				resp = requests.post(
@@ -517,7 +537,11 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
-	for model in get_aitunnel_model_candidates():
+	
+	# Используем runtime модель или fallback на список
+	models_to_try = [RUNTIME_AITUNNEL_MODEL] if RUNTIME_AITUNNEL_MODEL else get_aitunnel_model_candidates()
+	
+	for model in models_to_try:
 		for attempt in range(2):
 			try:
 				resp = requests.post(
@@ -566,7 +590,8 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 
 def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str, str]],
 					  openrouter_key: str, aitunnel_key: str, provider: str) -> str:
-	prov = (provider or "AUTO").upper()
+	# Используем runtime переменные для переключения в админке
+	prov = (RUNTIME_AI_PROVIDER or provider or "AUTO").upper()
 	is_aitunnel_ready = bool(aitunnel_key and AITUNNEL_API_URL)
 	is_openrouter_ready = bool(openrouter_key)
 
@@ -810,22 +835,37 @@ def handle_admin_panel(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> None:
-	global RUNTIME_AITUNNEL_MODEL
+	global RUNTIME_AITUNNEL_MODEL, RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL
 	if user_id not in ADMIN_USER_IDS:
 		return
 	model = (model_name or "").strip()
 	if not model:
 		send_message(vk, peer_id, "Модель не указана.")
 		return
-	RUNTIME_AITUNNEL_MODEL = model
-	send_message(vk, peer_id, f"OK. Текущая модель AITunnel: {RUNTIME_AITUNNEL_MODEL}", keyboard=build_admin_keyboard())
+	
+	# Определяем провайдера по названию модели
+	if model.startswith(("deepseek/", "qwen/")):
+		RUNTIME_AI_PROVIDER = "OPENROUTER"
+		RUNTIME_OPENROUTER_MODEL = model
+		send_message(vk, peer_id, f"OK. Переключился на OpenRouter, модель: {model}", keyboard=build_admin_keyboard())
+	else:
+		RUNTIME_AI_PROVIDER = "AITUNNEL"
+		RUNTIME_AITUNNEL_MODEL = model
+		send_message(vk, peer_id, f"OK. Переключился на AITunnel, модель: {model}", keyboard=build_admin_keyboard())
 
 
 def handle_admin_current(vk, peer_id: int, user_id: int) -> None:
 	if user_id not in ADMIN_USER_IDS:
 		return
-	current = RUNTIME_AITUNNEL_MODEL or AITUNNEL_MODEL
-	send_message(vk, peer_id, f"Текущая модель AITunnel: {current}", keyboard=build_admin_keyboard())
+	
+	if RUNTIME_AI_PROVIDER == "OPENROUTER":
+		# Показываем текущую модель OpenRouter
+		current = RUNTIME_OPENROUTER_MODEL or DEEPSEEK_MODEL
+		send_message(vk, peer_id, f"Текущий провайдер: OpenRouter\nМодель: {current}", keyboard=build_admin_keyboard())
+	else:
+		# Показываем текущую модель AITunnel
+		current = RUNTIME_AITUNNEL_MODEL or AITUNNEL_MODEL
+		send_message(vk, peer_id, f"Текущий провайдер: AITunnel\nМодель: {current}", keyboard=build_admin_keyboard())
 
 
 # ----- Викторина -----
