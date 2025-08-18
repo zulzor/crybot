@@ -174,6 +174,7 @@ class QuizState:
 	answer: str
 	active: bool = True
 	score: Dict[int, int] = field(default_factory=dict)  # user_id -> points
+	attempts: int = 0
 
 # Простейший пул вопросов (можно расширять)
 QUIZ_QUESTIONS: List[Tuple[str, str]] = [
@@ -700,15 +701,54 @@ def handle_quiz_answer(vk, peer_id: int, user_id: int, text: str) -> None:
 	state = QUIZZES.get(peer_id)
 	if not state or not state.active:
 		return
-	answer = (text or "").lower().strip()
-	if not answer:
+	answer_raw = (text or "").strip()
+	if not answer_raw:
 		return
-	if answer == state.answer:
+
+	# спец-команды
+	answer_low = answer_raw.lower()
+	if answer_low in {"подсказка", "hint"}:
+		hint = state.answer[:1] + "*" * max(0, len(state.answer) - 1)
+		send_message(vk, peer_id, f"Подсказка: {hint}")
+		return
+	if answer_low in {"сдаюсь", "pass"}:
+		send_message(vk, peer_id, f"Ответ: {state.answer}", keyboard=build_quiz_keyboard())
+		QUIZZES.pop(peer_id, None)
+		return
+
+	# нормализация: нижний регистр, ё->е, убрать пунктуацию
+	def normalize(s: str) -> str:
+		res = s.lower().replace("ё", "е")
+		allowed = []
+		for ch in res:
+			if ch.isalnum() or ch.isspace():
+				allowed.append(ch)
+		return " ".join("".join(allowed).split())
+
+	user_norm = normalize(answer_raw)
+	gold_norm = normalize(state.answer)
+	user_words = set(user_norm.split())
+
+	# Совпадение по слову или подстроке
+	correct = (
+		gold_norm in user_words or
+		gold_norm in user_norm
+	)
+
+	if correct:
 		state.score[user_id] = state.score.get(user_id, 0) + 1
 		send_message(vk, peer_id, f"Верно! +1 очко {mention(user_id)}.\nСчёт: " + ", ".join(f"{mention(uid)}: {pts}" for uid, pts in state.score.items()), keyboard=build_quiz_keyboard())
 		QUIZZES.pop(peer_id, None)
 	else:
-		send_message(vk, peer_id, "Неверно. Попробуйте ещё!")
+		state.attempts += 1
+		if state.attempts % 3 == 0:
+			hint = state.answer[:2] + "*" * max(0, len(state.answer) - 2)
+			send_message(vk, peer_id, f"Неверно. Подсказка: {hint}")
+		elif state.attempts >= 6:
+			send_message(vk, peer_id, f"Правильный ответ: {state.answer}", keyboard=build_quiz_keyboard())
+			QUIZZES.pop(peer_id, None)
+		else:
+			send_message(vk, peer_id, "Неверно. Попробуйте ещё!")
 
 
 def handle_quiz_end(vk, peer_id: int) -> None:
