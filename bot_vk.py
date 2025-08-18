@@ -845,10 +845,12 @@ def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> N
 	
 	# Определяем провайдера по названию модели
 	if model.startswith(("deepseek/", "qwen/")):
+		# OpenRouter модели: deepseek/deepseek-chat-v3-0324:free, qwen/qwen3-coder:free
 		RUNTIME_AI_PROVIDER = "OPENROUTER"
 		RUNTIME_OPENROUTER_MODEL = model
 		send_message(vk, peer_id, f"OK. Переключился на OpenRouter, модель: {model}", keyboard=build_admin_keyboard())
 	else:
+		# AITunnel модели: gpt-5-nano, gemini-flash-1.5-8b, deepseek-chat, deepseek-r1
 		RUNTIME_AI_PROVIDER = "AITUNNEL"
 		RUNTIME_AITUNNEL_MODEL = model
 		send_message(vk, peer_id, f"OK. Переключился на AITunnel, модель: {model}", keyboard=build_admin_keyboard())
