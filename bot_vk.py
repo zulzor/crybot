@@ -167,12 +167,32 @@ GUESS_SESSIONS: Dict[int, GuessNumberSession] = {}
 AI_ACTIVE_CHATS: Set[int] = set()
 AI_HISTORY: Dict[int, List[Dict[str, str]]] = {}  # peer_id -> [{"role": "...", "content": "..."}]
 
+# ---------- Викторина состояния ----------
+@dataclass
+class QuizState:
+	question: str
+	answer: str
+	active: bool = True
+	score: Dict[int, int] = field(default_factory=dict)  # user_id -> points
+
+# Простейший пул вопросов (можно расширять)
+QUIZ_QUESTIONS: List[Tuple[str, str]] = [
+	("Столица Франции?", "париж"),
+	("2+2?", "4"),
+	("Цвет неба днём?", "синий"),
+	("Автор 'Война и мир'?", "толстой"),
+]
+
+# peer_id -> QuizState
+QUIZZES: Dict[int, QuizState] = {}
+
 
 # ---------- Клавиатуры ----------
 def build_main_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
 	keyboard.add_button("Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
+	keyboard.add_button("Викторина", color=VkKeyboardColor.SECONDARY, payload={"action": "start_quiz"})
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
@@ -208,6 +228,13 @@ def build_guess_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("Старт (2 игрока)", color=VkKeyboardColor.POSITIVE, payload={"action": "g_begin"})
 	keyboard.add_button("Отмена", color=VkKeyboardColor.NEGATIVE, payload={"action": "g_cancel"})
+	return keyboard.get_keyboard()
+
+
+def build_quiz_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Начать вопрос", color=VkKeyboardColor.POSITIVE, payload={"action": "quiz_begin"})
+	keyboard.add_button("Завершить", color=VkKeyboardColor.NEGATIVE, payload={"action": "quiz_end"})
 	return keyboard.get_keyboard()
 
 
@@ -653,6 +680,45 @@ def handle_admin_current(vk, peer_id: int, user_id: int) -> None:
 	send_message(vk, peer_id, f"Текущая модель AITunnel: {current}", keyboard=build_admin_keyboard())
 
 
+# ----- Викторина -----
+def handle_start_quiz(vk, peer_id: int) -> None:
+	QUIZZES.pop(peer_id, None)
+	send_message(vk, peer_id, "Викторина! Нажмите 'Начать вопрос' для первого вопроса.", keyboard=build_quiz_keyboard())
+
+
+def handle_quiz_begin(vk, peer_id: int) -> None:
+	# Берём случайный вопрос
+	if not QUIZ_QUESTIONS:
+		send_message(vk, peer_id, "Нет доступных вопросов.")
+		return
+	q, a = random.choice(QUIZ_QUESTIONS)
+	QUIZZES[peer_id] = QuizState(question=q, answer=a.lower().strip())
+	send_message(vk, peer_id, f"Вопрос: {q}\nОтвет напишите текстом.")
+
+
+def handle_quiz_answer(vk, peer_id: int, user_id: int, text: str) -> None:
+	state = QUIZZES.get(peer_id)
+	if not state or not state.active:
+		return
+	answer = (text or "").lower().strip()
+	if not answer:
+		return
+	if answer == state.answer:
+		state.score[user_id] = state.score.get(user_id, 0) + 1
+		send_message(vk, peer_id, f"Верно! +1 очко {mention(user_id)}.\nСчёт: " + ", ".join(f"{mention(uid)}: {pts}" for uid, pts in state.score.items()), keyboard=build_quiz_keyboard())
+		QUIZZES.pop(peer_id, None)
+	else:
+		send_message(vk, peer_id, "Неверно. Попробуйте ещё!")
+
+
+def handle_quiz_end(vk, peer_id: int) -> None:
+	state = QUIZZES.pop(peer_id, None)
+	if not state:
+		send_message(vk, peer_id, "Викторина уже завершена.", keyboard=build_main_keyboard())
+		return
+	send_message(vk, peer_id, "Викторина завершена.", keyboard=build_main_keyboard())
+
+
 # ---------- ИИ‑чат утилиты ----------
 def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
 	# ИИ включается только вручную и для ЛС, и для бесед
@@ -720,6 +786,9 @@ def main() -> None:
 		if text in {"угадай число", "угадай", "число"}:
 			handle_start_guess(vk, peer_id, user_id)
 			continue
+		if text in {"викторина"}:
+			handle_start_quiz(vk, peer_id)
+			continue
 		# Админ-панель по команде в ЛС
 		if is_dm and text in {"/admin", "админ", "admin"}:
 			handle_admin_panel(vk, peer_id, user_id)
@@ -747,6 +816,16 @@ def main() -> None:
 		# Угадай число
 		if action == "start_guess":
 			handle_start_guess(vk, peer_id, user_id)
+			continue
+		# Викторина
+		if action == "start_quiz":
+			handle_start_quiz(vk, peer_id)
+			continue
+		if action == "quiz_begin":
+			handle_quiz_begin(vk, peer_id)
+			continue
+		if action == "quiz_end":
+			handle_quiz_end(vk, peer_id)
 			continue
 		if action == "g_join":
 			handle_guess_join(vk, peer_id, user_id)
@@ -793,6 +872,11 @@ def main() -> None:
 				else:
 					send_message(vk, peer_id, f"Введи число от {sess.min_value} до {sess.max_value}.")
 					continue
+
+		# Викторина: перехват ответа текстом
+		if peer_id in QUIZZES and text_raw:
+			handle_quiz_answer(vk, peer_id, user_id, text_raw)
+			continue
 
 		# ИИ‑чат: в личке и беседе — только если включён явно
 		if text_raw and ai_enabled_for_peer(peer_id, False):
