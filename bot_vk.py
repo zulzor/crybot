@@ -6,6 +6,7 @@ import random
 import ctypes
 import atexit
 import requests
+import difflib
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, List, Tuple
@@ -236,18 +237,20 @@ def format_top(vk, game_key: str, limit: int = 10) -> str:
 @dataclass
 class QuizState:
 	question: str
-	answer: str
+	answers: List[str]
 	active: bool = True
 	score: Dict[int, int] = field(default_factory=dict)  # user_id -> points
 	attempts: int = 0
 
 # Простейший пул вопросов (можно расширять)
-QUIZ_QUESTIONS: List[Tuple[str, str]] = [
-	("Столица Франции?", "париж"),
-	("2+2?", "4"),
-	("Цвет неба днём?", "синий"),
-	("Автор 'Война и мир'?", "толстой"),
+QUIZ_QUESTIONS: List[Tuple[str, List[str]]] = [
+	("Столица Франции?", ["париж"]),
+	("2+2?", ["4", "четыре"]),
+	("Цвет неба днём?", ["синий", "синее", "голубой", "голубое"]),
+	("Автор 'Война и мир'?", ["толстой", "лев толстой", "лев николаевич толстой"]),
 ]
+
+MAX_QUIZ_ATTEMPTS = 6
 
 # peer_id -> QuizState
 QUIZZES: Dict[int, QuizState] = {}
@@ -311,6 +314,8 @@ def build_quiz_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Начать вопрос", color=VkKeyboardColor.POSITIVE, payload={"action": "quiz_begin"})
 	keyboard.add_button("Завершить", color=VkKeyboardColor.NEGATIVE, payload={"action": "quiz_end"})
+	keyboard.add_line()
+	keyboard.add_button("Новый вопрос", color=VkKeyboardColor.PRIMARY, payload={"action": "quiz_next"})
 	return keyboard.get_keyboard()
 
 
@@ -768,8 +773,9 @@ def handle_quiz_begin(vk, peer_id: int) -> None:
 	if not QUIZ_QUESTIONS:
 		send_message(vk, peer_id, "Нет доступных вопросов.")
 		return
-	q, a = random.choice(QUIZ_QUESTIONS)
-	QUIZZES[peer_id] = QuizState(question=q, answer=a.lower().strip())
+	q, answers = random.choice(QUIZ_QUESTIONS)
+	answers_norm = [a.lower().strip() for a in answers]
+	QUIZZES[peer_id] = QuizState(question=q, answers=answers_norm)
 	send_message(vk, peer_id, f"Вопрос: {q}\nОтвет напишите текстом.")
 
 
@@ -802,14 +808,17 @@ def handle_quiz_answer(vk, peer_id: int, user_id: int, text: str) -> None:
 		return " ".join("".join(allowed).split())
 
 	user_norm = normalize(answer_raw)
-	gold_norm = normalize(state.answer)
+	gold_norms = [normalize(a) for a in state.answers]
 	user_words = set(user_norm.split())
 
-	# Совпадение по слову или подстроке
-	correct = (
-		gold_norm in user_words or
-		gold_norm in user_norm
-	)
+	# Совпадение по слову, подстроке или фаззи-метч
+	def is_match(g: str, u: str) -> bool:
+		if g in u or g in user_words:
+			return True
+		score = difflib.SequenceMatcher(None, g, u).ratio()
+		return score >= 0.8
+
+	correct = any(is_match(g, user_norm) for g in gold_norms)
 
 	if correct:
 		state.score[user_id] = state.score.get(user_id, 0) + 1
@@ -820,10 +829,12 @@ def handle_quiz_answer(vk, peer_id: int, user_id: int, text: str) -> None:
 	else:
 		state.attempts += 1
 		if state.attempts % 3 == 0:
-			hint = state.answer[:2] + "*" * max(0, len(state.answer) - 2)
+			g = gold_norms[0] if gold_norms else ""
+			hint = g[:2] + "*" * max(0, len(g) - 2)
 			send_message(vk, peer_id, f"Неверно. Подсказка: {hint}")
-		elif state.attempts >= 6:
-			send_message(vk, peer_id, f"Правильный ответ: {state.answer}", keyboard=build_quiz_keyboard())
+		elif state.attempts >= MAX_QUIZ_ATTEMPTS:
+			correct_text = ", ".join(state.answers)
+			send_message(vk, peer_id, f"Правильный ответ: {correct_text}", keyboard=build_quiz_keyboard())
 			QUIZZES.pop(peer_id, None)
 		else:
 			send_message(vk, peer_id, "Неверно. Попробуйте ещё!")
@@ -958,6 +969,9 @@ def main() -> None:
 			handle_start_quiz(vk, peer_id)
 			continue
 		if action == "quiz_begin":
+			handle_quiz_begin(vk, peer_id)
+			continue
+		if action == "quiz_next":
 			handle_quiz_begin(vk, peer_id)
 			continue
 		if action == "quiz_end":
