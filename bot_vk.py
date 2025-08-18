@@ -23,7 +23,7 @@ load_dotenv()
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "").strip()
-MAX_HISTORY_MESSAGES = 12
+MAX_HISTORY_MESSAGES = 4
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
@@ -34,7 +34,7 @@ AITUNNEL_MODEL = os.getenv("AITUNNEL_MODEL", "deepseek-r1-fast").strip()
 AITUNNEL_MODELS = os.getenv("AITUNNEL_MODELS", "").strip()
 
 # Провайдер ИИ: OPENROUTER, AITUNNEL, AUTO
-AI_PROVIDER = os.getenv("AI_PROVIDER", "AUTO").strip().upper()
+AI_PROVIDER = os.getenv("AI_PROVIDER", "AITUNNEL").strip().upper()
 
 # ---------- Не даём Windows уснуть ----------
 ES_CONTINUOUS = 0x80000000
@@ -270,7 +270,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"model": model,
 						"messages": messages,
 						"temperature": 0.6,
-						"max_tokens": 180,
+						"max_tokens": 120,
 					},
 					timeout=45,
 				)
@@ -284,7 +284,8 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				if not text:
 					last_err = "empty content"
 					break
-				logger.info(f"AI OK model={model} attempt={attempt+1}")
+				usage = data.get("usage") or {}
+				logger.info(f"AI OK model={model} attempt={attempt+1} usage={usage}")
 				return text
 			except requests.HTTPError as e:
 				code = e.response.status_code if e.response else None
@@ -448,7 +449,7 @@ def handle_mafia_cancel(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_mafia_begin(vk, peer_id: int, user_id: int) -> None:
-	lobby = LOBBIES.get(peer_id)
+	lobby = LOBБIES.get(peer_id)
 	if not lobby:
 		send_message(vk, peer_id, "Лобби не найдено.")
 		return
@@ -465,8 +466,8 @@ def handle_mafia_begin(vk, peer_id: int, user_id: int) -> None:
 
 # ----- Угадай число -----
 def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
-	if peer_id in GUESS_SESSIONS:
-		sess = GUESS_SESSIONS[peer_id]
+	if peer_id in GUESS_SEССIONS:
+		sess = GUESS_SEССIONS[peer_id]
 		text = (
 			"Лобби «Угадай число». Участники: "
 			+ format_players(vk, sess.joined_ids)
@@ -476,7 +477,7 @@ def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
 		return
 	sess = GuessNumberSession(creator_id=user_id)
 	sess.add_player(user_id)
-	GUESS_SESSIONS[peer_id] = sess
+	GUESS_SEССIONS[peer_id] = sess
 	text = (
 		f"Создано лобби «Угадай число» создателем {mention(user_id)}.\n"
 		f"Игроки: {format_players(vk, sess.joined_ids)}\n"
@@ -486,7 +487,7 @@ def handle_start_guess(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_join(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SESSIONS.get(peer_id)
+	sess = GUESS_SEССIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби ещё не создано. Нажмите «Угадай число».", keyboard=build_main_keyboard())
 		return
@@ -501,32 +502,32 @@ def handle_guess_join(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_leave(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SESSIONS.get(peer_id)
+	sess = GUESS_SEССIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби ещё не создано.")
 		return
 	sess.remove_player(user_id)
 	if not sess.joined_ids:
-		GUESS_SESSIONS.pop(peer_id, None)
+		GUESS_SEССIONS.pop(peer_id, None)
 		send_message(vk, peer_id, "Лобби закрыто: игроков не осталось.", keyboard=build_main_keyboard())
 		return
 	send_message(vk, peer_id, f"{mention(user_id)} вышел.\nИгроки: {format_players(vk, sess.joined_ids)}", keyboard=build_guess_keyboard())
 
 
 def handle_guess_cancel(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SESSIONS.get(peer_id)
+	sess = GUESS_SEССIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби уже отсутствует.")
 		return
 	if user_id != sess.creator_id:
 		send_message(vk, peer_id, "Отменить может только создатель лобби.")
 		return
-	GUESS_SESSIONS.pop(peer_id, None)
+	GUESS_SEССIONS.pop(peer_id, None)
 	send_message(vk, peer_id, "Лобби «Угадай число» отменено.", keyboard=build_main_keyboard())
 
 
 def handle_guess_begin(vk, peer_id: int, user_id: int) -> None:
-	sess = GUESS_SESSIONS.get(peer_id)
+	sess = GUESS_SEССIONS.get(peer_id)
 	if not sess:
 		send_message(vk, peer_id, "Лобби не найдено.")
 		return
@@ -546,7 +547,7 @@ def handle_guess_begin(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> None:
-	sess = GUESS_SESSIONS.get(peer_id)
+	sess = GUESS_SEССIONS.get(peer_id)
 	if not sess or not sess.started:
 		return
 	if user_id not in sess.player_order:
@@ -563,7 +564,7 @@ def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> No
 			f"Попытки: {', '.join(f'{mention(pid)}: {sess.attempts.get(pid,0)}' for pid in sess.player_order)}"
 		)
 		send_message(vk, peer_id, msg, keyboard=build_main_keyboard())
-		GUESS_SESSIONS.pop(peer_id, None)
+		GUESS_SEССIONS.pop(peer_id, None)
 		return
 
 	if guess_value < sess.secret_number:
@@ -707,10 +708,10 @@ def main() -> None:
 			continue
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
-		if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
+		if peer_id in GUESS_SEССIONS and GUESS_SEССIONS[peer_id].started:
 			if text.isdigit():
 				guess = int(text)
-				sess = GUESS_SESSIONS[peer_id]
+				sess = GUESS_SEССIONS[peer_id]
 				if sess.min_value <= guess <= sess.max_value:
 					handle_guess_attempt(vk, peer_id, user_id, guess)
 					continue
@@ -718,8 +719,8 @@ def main() -> None:
 					send_message(vk, peer_id, f"Введи число от {sess.min_value} до {sess.max_value}.")
 					continue
 
-		# ИИ‑чат: в личке — всегда; в беседе — только если включён
-		if text_raw and ai_enabled_for_peer(peer_id, is_dm):
+		# ИИ‑чат: в личке и беседе — только если включён явно
+		if text_raw and ai_enabled_for_peer(peer_id, False):
 			handle_ai_message(vk, peer_id, text_raw, openrouter_key, aitunnel_key, ai_provider, system_prompt)
 			continue
 
