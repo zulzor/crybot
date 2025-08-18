@@ -305,19 +305,20 @@ def build_main_keyboard() -> str:
 
 def build_admin_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	# AITunnel модели
+	# AITunnel модели (только 3)
 	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
 	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
 	keyboard.add_line()
 	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
-	keyboard.add_button("deepseek-r1", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-r1"})
 	keyboard.add_line()
-	# OpenRouter модели
+	# OpenRouter модели (все остальные)
 	keyboard.add_button("deepseek-chat-v3", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-chat-v3-0324:free"})
 	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
 	keyboard.add_line()
 	keyboard.add_button("qwen3-coder", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "qwen/qwen3-coder:free"})
 	keyboard.add_button("deepseek-r1-free", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1:free"})
+	keyboard.add_line()
+	keyboard.add_button("deepseek-r1", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek-r1"})
 	keyboard.add_line()
 	keyboard.add_button("Текущая", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
 	keyboard.add_line()
@@ -844,13 +845,13 @@ def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> N
 		return
 	
 	# Определяем провайдера по названию модели
-	if model.startswith(("deepseek/", "qwen/")):
-		# OpenRouter модели: deepseek/deepseek-chat-v3-0324:free, qwen/qwen3-coder:free
+	if model.startswith(("deepseek/", "qwen/")) or model == "deepseek-r1":
+		# OpenRouter модели: deepseek/deepseek-chat-v3-0324:free, qwen/qwen3-coder:free, deepseek-r1
 		RUNTIME_AI_PROVIDER = "OPENROUTER"
 		RUNTIME_OPENROUTER_MODEL = model
 		send_message(vk, peer_id, f"OK. Переключился на OpenRouter, модель: {model}", keyboard=build_admin_keyboard())
 	else:
-		# AITunnel модели: gpt-5-nano, gemini-flash-1.5-8b, deepseek-chat, deepseek-r1
+		# AITunnel модели: gpt-5-nano, gemini-flash-1.5-8b, deepseek-chat
 		RUNTIME_AI_PROVIDER = "AITUNNEL"
 		RUNTIME_AITUNNEL_MODEL = model
 		send_message(vk, peer_id, f"OK. Переключился на AITunnel, модель: {model}", keyboard=build_admin_keyboard())
