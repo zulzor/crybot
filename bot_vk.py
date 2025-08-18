@@ -167,6 +167,71 @@ GUESS_SESSIONS: Dict[int, GuessNumberSession] = {}
 AI_ACTIVE_CHATS: Set[int] = set()
 AI_HISTORY: Dict[int, List[Dict[str, str]]] = {}  # peer_id -> [{"role": "...", "content": "..."}]
 
+# ---------- Профили игроков и топы ----------
+@dataclass
+class UserProfile:
+	user_id: int
+	name: str = ""
+	stats: Dict[str, int] = field(default_factory=dict)  # game_key -> points
+
+PROFILES: Dict[int, UserProfile] = {}
+PROFILES_FILE = os.getenv("PROFILES_FILE", "profiles.json").strip() or "profiles.json"
+
+def load_profiles() -> None:
+	try:
+		if not os.path.exists(PROFILES_FILE):
+			return
+		with open(PROFILES_FILE, "r", encoding="utf-8") as f:
+			data = json.load(f)
+		for uid_str, prof in data.items():
+			try:
+				uid = int(uid_str)
+				PROFILES[uid] = UserProfile(user_id=uid, name=prof.get("name", ""), stats=dict(prof.get("stats", {})))
+			except Exception:
+				continue
+	except Exception:
+		pass
+
+def save_profiles() -> None:
+	try:
+		os.makedirs(os.path.dirname(PROFILES_FILE) or ".", exist_ok=True)
+		out = {str(uid): {"name": p.name, "stats": p.stats} for uid, p in PROFILES.items()}
+		with open(PROFILES_FILE, "w", encoding="utf-8") as f:
+			json.dump(out, f, ensure_ascii=False, indent=2)
+	except Exception:
+		pass
+
+def get_profile(vk, user_id: int) -> UserProfile:
+	prof = PROFILES.get(user_id)
+	if not prof:
+		prof = UserProfile(user_id=user_id)
+		PROFILES[user_id] = prof
+		# попытаться подтянуть имя
+		try:
+			users = vk.users.get(user_ids=str(user_id), name_case="Nom")
+			if users:
+				prof.name = f"{users[0]['first_name']} {users[0]['last_name']}"
+		except Exception:
+			pass
+		save_profiles()
+	return prof
+
+def increment_stat(vk, user_id: int, game_key: str, inc: int = 1) -> None:
+	prof = get_profile(vk, user_id)
+	prof.stats[game_key] = prof.stats.get(game_key, 0) + inc
+	save_profiles()
+
+def format_top(vk, game_key: str, limit: int = 10) -> str:
+	items = sorted(((uid, p.stats.get(game_key, 0)) for uid, p in PROFILES.items()), key=lambda x: x[1], reverse=True)
+	items = [it for it in items if it[1] > 0][:limit]
+	if not items:
+		return "Пока нет результатов."
+	lines: List[str] = []
+	for idx, (uid, pts) in enumerate(items, start=1):
+		name = PROFILES.get(uid).name or "игрок"
+		lines.append(f"{idx}. {mention(uid, name)} — {pts}")
+	return "\n".join(lines)
+
 # ---------- Викторина состояния ----------
 @dataclass
 class QuizState:
@@ -625,6 +690,8 @@ def handle_guess_attempt(vk, peer_id: int, user_id: int, guess_value: int) -> No
 			f"Попытки: {', '.join(f'{mention(pid)}: {sess.attempts.get(pid,0)}' for pid in sess.player_order)}"
 		)
 		send_message(vk, peer_id, msg, keyboard=build_main_keyboard())
+		# стат для угадай-число
+		increment_stat(vk, user_id, "guess_wins", 1)
 		GUESS_SESSIONS.pop(peer_id, None)
 		return
 
@@ -738,6 +805,8 @@ def handle_quiz_answer(vk, peer_id: int, user_id: int, text: str) -> None:
 	if correct:
 		state.score[user_id] = state.score.get(user_id, 0) + 1
 		send_message(vk, peer_id, f"Верно! +1 очко {mention(user_id)}.\nСчёт: " + ", ".join(f"{mention(uid)}: {pts}" for uid, pts in state.score.items()), keyboard=build_quiz_keyboard())
+		# стат для викторины
+		increment_stat(vk, user_id, "quiz_points", 1)
 		QUIZZES.pop(peer_id, None)
 	else:
 		state.attempts += 1
@@ -776,6 +845,7 @@ def add_history(peer_id: int, role: str, content: str) -> None:
 def main() -> None:
 	configure_logging()
 	load_dotenv()
+	load_profiles()
 	prevent_sleep()
 	logger = logging.getLogger("vk-mafia-bot")
 	logger.info(f"OpenRouter endpoint: {DEEPSEEK_API_URL}")
@@ -828,6 +898,24 @@ def main() -> None:
 			continue
 		if text in {"викторина"}:
 			handle_start_quiz(vk, peer_id)
+			continue
+		if text in {"/me", "профиль", "профиль мой"}:
+			prof = get_profile(vk, user_id)
+			s = prof.stats
+			msg = (
+				f"Профиль {mention(user_id, prof.name or 'игрок')}:\n"
+				f"Викторина очков: {s.get('quiz_points', 0)}\n"
+				f"Угадай число побед: {s.get('guess_wins', 0)}"
+			)
+			send_message(vk, peer_id, msg)
+			continue
+		if text in {"/top quiz", "/top викторина", "топ викторина"}:
+			msg = "Топ викторины:\n" + format_top(vk, "quiz_points")
+			send_message(vk, peer_id, msg)
+			continue
+		if text in {"/top guess", "/top угадай", "топ угадай"}:
+			msg = "Топ угадай число:\n" + format_top(vk, "guess_wins")
+			send_message(vk, peer_id, msg)
 			continue
 		# Админ-панель по команде в ЛС
 		if is_dm and text in {"/admin", "админ", "admin"}:
