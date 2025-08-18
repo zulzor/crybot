@@ -383,6 +383,20 @@ SUSPICIOUS_PATTERNS = [
 	"admin_impersonation"  # Подделка админа
 ]
 
+# Запрещённые слова и паттерны
+FORBIDDEN_WORDS = [
+	"спам", "реклама", "купить", "продать", "заработок", "криптовалюта",
+	"биткоин", "майнинг", "инвестиции", "лохотрон", "развод"
+]
+
+# Паттерны спама
+SPAM_PATTERNS = [
+	r"https?://[^\s]+",  # Ссылки
+	r"\d{10,}",          # Длинные числа (телефоны)
+	r"[A-Z]{5,}",        # Капс
+	r"(\w)\1{3,}"        # Повторяющиеся символы
+]
+
 
 def track_user_activity(user_id: int, action: str, context: str = "") -> None:
 	"""Отслеживает активность пользователя"""
@@ -461,6 +475,319 @@ def get_user_activity_report(user_id: int) -> str:
 		f"Предупреждений: {activity.warnings}\n"
 		f"Подозрительных действий: {len(activity.suspicious_actions)}"
 	)
+
+
+# ---------- Автоматическая модерация ----------
+def auto_moderate_message(text: str, user_id: int) -> Tuple[bool, str, str]:
+	"""
+	Автоматическая модерация сообщения
+	Возвращает: (is_violation, action, reason)
+	"""
+	text_lower = text.lower()
+	
+	# Проверка на запрещённые слова
+	for word in FORBIDDEN_WORDS:
+		if word in text_lower:
+			return True, "warn", f"Запрещённое слово: {word}"
+	
+	# Проверка на спам-паттерны
+	for pattern in SPAM_PATTERNS:
+		if re.search(pattern, text, re.IGNORECASE):
+			return True, "delete", f"Спам-паттерн: {pattern}"
+	
+	# Проверка на капс (больше 70% заглавных букв)
+	upper_count = sum(1 for c in text if c.isupper())
+	if len(text) > 10 and upper_count / len(text) > 0.7:
+		return True, "warn", "Слишком много заглавных букв"
+	
+	# Проверка на повторяющиеся символы
+	if re.search(r"(.)\1{4,}", text):
+		return True, "warn", "Повторяющиеся символы"
+	
+	return False, "", ""
+
+
+def auto_delete_message(vk, peer_id: int, message_id: int, reason: str) -> None:
+	"""Автоматически удаляет сообщение"""
+	try:
+		vk.method("messages.delete", {
+			"peer_id": peer_id,
+			"message_id": message_id,
+			"delete_for_all": True
+		})
+		logger.info(f"Auto-deleted message {message_id} in {peer_id}: {reason}")
+	except Exception as e:
+		logger.error(f"Failed to auto-delete message: {e}")
+
+
+def auto_warn_user(user_id: int, reason: str) -> str:
+	"""Автоматически выносит предупреждение"""
+	return warn_user(user_id, f"Автоматически: {reason}", 0)  # 0 = система
+
+
+# ---------- Система репортов ----------
+@dataclass
+class UserReport:
+	reporter_id: int
+	reported_id: int
+	reason: str
+	timestamp: float
+	status: str = "pending"  # pending, reviewed, resolved
+	moderator_id: Optional[int] = None
+	resolution: str = ""
+
+# База репортов
+USER_REPORTS: List[UserReport] = []
+
+
+def report_user(reporter_id: int, reported_id: int, reason: str) -> str:
+	"""Пользователь жалуется на другого пользователя"""
+	# Проверяем, не жаловался ли уже
+	for report in USER_REPORTS:
+		if (report.reporter_id == reporter_id and 
+			report.reported_id == reported_id and 
+			report.status == "pending"):
+			return "❌ Вы уже жаловались на этого пользователя"
+	
+	# Создаём репорт
+	report = UserReport(
+		reporter_id=reporter_id,
+		reported_id=reported_id,
+		reason=reason,
+		timestamp=time.time()
+	)
+	USER_REPORTS.append(report)
+	
+	# Уведомляем модераторов
+	notify_moderators_of_report(report)
+	
+	return "✅ Жалоба отправлена модераторам"
+
+
+def notify_moderators_of_report(report: UserReport) -> None:
+	"""Уведомляет модераторов о новом репорте"""
+	# Находим всех модераторов и админов
+	moderators = [uid for uid, role in USER_ROLES.items() 
+				 if role in [UserRole.MODERATOR, UserRole.ADMIN, UserRole.SUPER_ADMIN]]
+	
+	# Отправляем уведомление (в реальности нужно реализовать отправку)
+	logger.info(f"New report: {report.reporter_id} -> {report.reported_id}: {report.reason}")
+	logger.info(f"Notifying moderators: {moderators}")
+
+
+def get_pending_reports() -> List[UserReport]:
+	"""Получить все необработанные репорты"""
+	return [r for r in USER_REPORTS if r.status == "pending"]
+
+
+def resolve_report(report_index: int, moderator_id: int, resolution: str) -> str:
+	"""Модератор обрабатывает репорт"""
+	if not has_privilege(moderator_id, "warn_users"):
+		return "❌ У вас нет прав для обработки репортов"
+	
+	if report_index >= len(USER_REPORTS):
+		return "❌ Репорт не найден"
+	
+	report = USER_REPORTS[report_index]
+	if report.status != "pending":
+		return "❌ Репорт уже обработан"
+	
+	report.status = "resolved"
+	report.moderator_id = moderator_id
+	report.resolution = resolution
+	
+	return f"✅ Репорт обработан: {resolution}"
+
+
+# ---------- Система временных банов ----------
+@dataclass
+class UserBan:
+	user_id: int
+	reason: str
+	banned_by: int
+	banned_at: float
+	expires_at: float
+	active: bool = True
+
+# База банов
+USER_BANS: Dict[int, UserBan] = {}
+
+
+def ban_user(user_id: int, duration_hours: int, reason: str, moderator_id: int) -> str:
+	"""Банит пользователя на определённое время"""
+	if not has_privilege(moderator_id, "ban_users"):
+		return "❌ У вас нет прав для бана пользователей"
+	
+	current_time = time.time()
+	expires_at = current_time + (duration_hours * 3600)
+	
+	ban = UserBan(
+		user_id=user_id,
+		reason=reason,
+		banned_by=moderator_id,
+		banned_at=current_time,
+		expires_at=expires_at
+	)
+	
+	USER_BANS[user_id] = ban
+	
+	# Автоматически снимаем бан по истечении времени
+	schedule_unban(user_id, expires_at)
+	
+	return f"🚫 Пользователь {user_id} забанен на {duration_hours} часов. Причина: {reason}"
+
+
+def unban_user(user_id: int, moderator_id: int) -> str:
+	"""Снимает бан с пользователя"""
+	if not has_privilege(moderator_id, "ban_users"):
+		return "❌ У вас нет прав для снятия бана"
+	
+	if user_id not in USER_BANS:
+		return "❌ Пользователь не забанен"
+	
+	ban = USER_BANS[user_id]
+	ban.active = False
+	del USER_BANS[user_id]
+	
+	return f"✅ Бан с пользователя {user_id} снят"
+
+
+def is_user_banned(user_id: int) -> Tuple[bool, Optional[UserBan]]:
+	"""Проверяет, забанен ли пользователь"""
+	if user_id not in USER_BANS:
+		return False, None
+	
+	ban = USER_BANS[user_id]
+	current_time = time.time()
+	
+	# Проверяем, не истёк ли бан
+	if current_time > ban.expires_at:
+		ban.active = False
+		del USER_BANS[user_id]
+		return False, None
+	
+	return ban.active, ban
+
+
+def schedule_unban(user_id: int, expires_at: float) -> None:
+	"""Планирует автоматическое снятие бана"""
+	# В реальности здесь должна быть система планировщика
+	# Пока просто логируем
+	logger.info(f"Ban scheduled for user {user_id}, expires at {expires_at}")
+
+
+def get_active_bans() -> List[UserBan]:
+	"""Получить все активные баны"""
+	return [ban for ban in USER_BANS.values() if ban.active]
+
+
+# ---------- Аналитика безопасности ----------
+@dataclass
+class SecurityIncident:
+	incident_type: str
+	user_id: int
+	description: str
+	timestamp: float
+	severity: str = "low"  # low, medium, high, critical
+	resolved: bool = False
+
+# База инцидентов безопасности
+SECURITY_INCIDENTS: List[SecurityIncident] = []
+
+
+def log_security_incident(incident_type: str, user_id: int, description: str, severity: str = "medium") -> None:
+	"""Логирует инцидент безопасности"""
+	incident = SecurityIncident(
+		incident_type=incident_type,
+		user_id=user_id,
+		description=description,
+		timestamp=time.time(),
+		severity=severity
+	)
+	SECURITY_INCIDENTS.append(incident)
+	
+	# Логируем в основной лог
+	logger.warning(f"Security incident: {incident_type} by user {user_id}: {description}")
+
+
+def generate_security_report() -> str:
+	"""Генерирует отчёт по безопасности"""
+	total_incidents = len(SECURITY_INCIDENTS)
+	resolved_incidents = len([i for i in SECURITY_INCIDENTS if i.resolved])
+	active_incidents = total_incidents - resolved_incidents
+	
+	# Статистика по типам инцидентов
+	incident_types = {}
+	for incident in SECURITY_INCIDENTS:
+		incident_types[incident.incident_type] = incident_types.get(incident.incident_type, 0) + 1
+	
+	# Статистика по серьёзности
+	severity_stats = {}
+	for incident in SECURITY_INCIDENTS:
+		severity_stats[incident.severity] = severity_stats.get(incident.severity, 0) + 1
+	
+	# Топ подозрительных пользователей
+	user_incidents = {}
+	for incident in SECURITY_INCIDENTS:
+		user_incidents[incident.user_id] = user_incidents.get(incident.user_id, 0) + 1
+	
+	top_suspicious = sorted(user_incidents.items(), key=lambda x: x[1], reverse=True)[:5]
+	
+	report = (
+		f"🛡️ Отчёт по безопасности:\n\n"
+		f"📊 Общая статистика:\n"
+		f"• Всего инцидентов: {total_incidents}\n"
+		f"• Решено: {resolved_incidents}\n"
+		f"• Активно: {active_incidents}\n\n"
+		f"🚨 По типам:\n"
+	)
+	
+	for incident_type, count in incident_types.items():
+		report += f"• {incident_type}: {count}\n"
+	
+	report += f"\n⚠️ По серьёзности:\n"
+	for severity, count in severity_stats.items():
+		report += f"• {severity}: {count}\n"
+	
+	report += f"\n👤 Топ подозрительных:\n"
+	for user_id, count in top_suspicious:
+		report += f"• {user_id}: {count} инцидентов\n"
+	
+	return report
+
+
+def get_suspicious_patterns_report() -> str:
+	"""Анализирует подозрительные паттерны"""
+	# Анализ активности пользователей
+	suspicious_users = []
+	
+	for user_id, activity in USER_ACTIVITY.items():
+		if activity.warnings >= 2 or len(activity.suspicious_actions) >= 3:
+			suspicious_users.append((user_id, activity))
+	
+	if not suspicious_users:
+		return "✅ Подозрительных паттернов не обнаружено"
+	
+	report = "🔍 Подозрительные паттерны:\n\n"
+	
+	for user_id, activity in suspicious_users:
+		report += f"👤 Пользователь {user_id}:\n"
+		report += f"• Предупреждений: {activity.warnings}\n"
+		report += f"• Подозрительных действий: {len(activity.suspicious_actions)}\n"
+		report += f"• Последнее действие: {activity.last_action}\n\n"
+	
+	return report
+
+
+def cleanup_old_incidents(days: int = 30) -> int:
+	"""Очищает старые инциденты"""
+	current_time = time.time()
+	cutoff_time = current_time - (days * 24 * 3600)
+	
+	old_incidents = [i for i in SECURITY_INCIDENTS if i.timestamp < cutoff_time]
+	SECURITY_INCIDENTS[:] = [i for i in SECURITY_INCIDENTS if i.timestamp >= cutoff_time]
+	
+	return len(old_incidents)
 
 # ---------- Викторина состояния ----------
 @dataclass
@@ -1558,6 +1885,46 @@ def main() -> None:
 			msg = "Топ 'Кальмар':\n" + format_top(vk, "squid_wins")
 			send_message(vk, peer_id, msg)
 			continue
+		
+		# Команды безопасности для пользователей
+		if text.startswith("/report "):
+			# Формат: /report @user_id причина
+			parts = text.split(" ", 2)
+			if len(parts) >= 3:
+				try:
+					reported_id = int(parts[1])
+					reason = parts[2]
+					result = report_user(user_id, reported_id, reason)
+					send_message(vk, peer_id, result)
+				except ValueError:
+					send_message(vk, peer_id, "❌ Неверный формат. Используйте: /report user_id причина")
+			else:
+				send_message(vk, peer_id, "❌ Неверный формат. Используйте: /report user_id причина")
+			continue
+		
+		if text in {"/security", "безопасность", "security"}:
+			# Показываем пользователю его статус безопасности
+			privacy_accepted, gdpr_consent = check_user_consents(user_id)
+			is_banned, ban_info = is_user_banned(user_id)
+			activity = USER_ACTIVITY.get(user_id)
+			
+			status_msg = "🛡️ Ваш статус безопасности:\n\n"
+			status_msg += f"✅ Политика конфиденциальности: {'Принята' if privacy_accepted else 'Не принята'}\n"
+			status_msg += f"✅ GDPR согласие: {'Принято' if gdpr_consent else 'Не принято'}\n"
+			
+			if is_banned:
+				remaining_time = int((ban_info.expires_at - time.time()) / 3600)
+				status_msg += f"🚫 Статус: Забанен (осталось {remaining_time} часов)\n"
+				status_msg += f"🚫 Причина: {ban_info.reason}\n"
+			else:
+				status_msg += "✅ Статус: Активен\n"
+			
+			if activity:
+				status_msg += f"⚠️ Предупреждений: {activity.warnings}\n"
+				status_msg += f"📊 Подозрительных действий: {len(activity.suspicious_actions)}"
+			
+			send_message(vk, peer_id, status_msg)
+			continue
 		# Админ-панель по команде в ЛС
 		if is_dm and text in {"/admin", "админ", "admin"}:
 			handle_admin_panel(vk, peer_id, user_id)
@@ -1683,6 +2050,39 @@ def main() -> None:
 		
 		# Отслеживание активности для всех действий
 		track_user_activity(user_id, action or "message", text[:50])
+		
+		# Проверка на бан
+		is_banned, ban_info = is_user_banned(user_id)
+		if is_banned:
+			remaining_time = int((ban_info.expires_at - time.time()) / 3600)
+			send_message(vk, peer_id, f"🚫 Вы забанены. Причина: {ban_info.reason}. Осталось: {remaining_time} часов")
+			continue
+		
+		# Автоматическая модерация сообщений
+		if text and not action:  # Только текстовые сообщения, не действия
+			is_violation, action_type, reason = auto_moderate_message(text, user_id)
+			if is_violation:
+				# Логируем инцидент
+				log_security_incident("content_violation", user_id, f"Text: {text[:100]}, Reason: {reason}")
+				
+				if action_type == "delete":
+					# Автоматически удаляем сообщение
+					try:
+						vk.method("messages.delete", {
+							"peer_id": peer_id,
+							"message_id": event.message.id,
+							"delete_for_all": True
+						})
+						send_message(vk, peer_id, f"🚫 Сообщение удалено автоматически. Причина: {reason}")
+					except Exception as e:
+						logger.error(f"Failed to auto-delete message: {e}")
+				
+				elif action_type == "warn":
+					# Автоматически выносим предупреждение
+					warning_msg = auto_warn_user(user_id, reason)
+					send_message(vk, peer_id, f"⚠️ {warning_msg}")
+				
+				continue  # Прерываем обработку сообщения
 
 		# Ход в игре «Угадай число»: любое сообщение с числом
 		if peer_id in GUESS_SESSIONS and GUESS_SESSIONS[peer_id].started:
