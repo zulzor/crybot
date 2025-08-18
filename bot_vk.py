@@ -24,6 +24,7 @@ MAX_HISTORY_MESSAGES = 12
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
+DEFAULT_AI_STYLE = os.getenv("AI_STYLE_DEFAULT", "normal").strip().lower()  # normal|meme
 
 # ---------- Graceful shutdown ----------
 shutdown_requested = False
@@ -141,9 +142,19 @@ GUESS_SESSIONS: Dict[int, GuessNumberSession] = {}
 AI_ACTIVE_CHATS: Set[int] = set()
 AI_HISTORY: Dict[int, List[Dict[str, str]]] = {}  # peer_id -> [{"role": "...", "content": "..."}]
 AI_CONFIRMATION_MODE: Dict[int, bool] = {}  # peer_id -> True если ждет подтверждения "привет"
+AI_STYLE_PER_CHAT: Dict[int, str] = {}  # peer_id -> style (normal|meme)
 
 
 # ---------- Клавиатуры ----------
+def build_dm_keyboard() -> str:
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	keyboard.add_line()
+	keyboard.add_button("Стиль: Норм", color=VkKeyboardColor.SECONDARY, payload={"action": "ai_style_normal"})
+	keyboard.add_button("Стиль: Мем", color=VkKeyboardColor.SECONDARY, payload={"action": "ai_style_meme"})
+	return keyboard.get_keyboard()
+
+
 def build_main_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
@@ -151,12 +162,9 @@ def build_main_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
-	return keyboard.get_keyboard()
-
-
-def build_dm_keyboard() -> str:
-	keyboard = VkKeyboard(one_time=False, inline=False)
-	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	keyboard.add_line()
+	keyboard.add_button("Стиль: Норм", color=VkKeyboardColor.SECONDARY, payload={"action": "ai_style_normal"})
+	keyboard.add_button("Стиль: Мем", color=VkKeyboardColor.SECONDARY, payload={"action": "ai_style_meme"})
 	return keyboard.get_keyboard()
 
 
@@ -553,15 +561,34 @@ def handle_ai_confirm_no(vk, peer_id: int) -> None:
 	AI_CONFIRMATION_MODE.pop(peer_id, None)
 	send_message(vk, peer_id, "Понял, ИИ не нужен. Выберите игру или напишите 'привет' для вызова ИИ.", keyboard=build_main_keyboard())
 
+def handle_ai_style_normal(vk, peer_id: int) -> None:
+	AI_STYLE_PER_CHAT[peer_id] = "normal"
+	send_message(vk, peer_id, "Стиль ИИ: обычный.")
+
+
+def handle_ai_style_meme(vk, peer_id: int) -> None:
+	AI_STYLE_PER_CHAT[peer_id] = "meme"
+	send_message(vk, peer_id, "Стиль ИИ: мемный. Готов шутить и кидать отсылочки!")
+
+
 def handle_ai_message(vk, peer_id: int, user_text: str, api_key: str, system_prompt: str) -> None:
 	# Проверяем команды выключения ИИ
 	if user_text.lower().strip() in {"выключись", "выключить ии", "выключить ии-чат", "стоп ии", "отключись"}:
 		handle_ai_off(vk, peer_id)
 		return
 	
+	# Команды стиля (текстовые)
+	if user_text.lower().strip() in {"стиль мем", "мемный стиль", "мемный"}:
+		handle_ai_style_meme(vk, peer_id)
+		return
+	if user_text.lower().strip() in {"стиль норм", "обычный стиль", "обычный"}:
+		handle_ai_style_normal(vk, peer_id)
+		return
+	
 	add_history(peer_id, "user", user_text)
-	reply = deepseek_reply(api_key, system_prompt, AI_HISTORY.get(peer_id, []), user_text)
-	reply = clamp_text(reply, MAX_AI_CHARS)
+	prompt = build_system_prompt(system_prompt, peer_id)
+	reply = deepseek_reply(api_key, prompt, AI_HISTORY.get(peer_id, []), user_text)
+	reply = clamp_text(retry_text := reply, MAX_AI_CHARS)
 	add_history(peer_id, "assistant", reply)
 	send_message(vk, peer_id, reply)
 
@@ -687,6 +714,12 @@ def main() -> None:
 					continue
 				if action == "ai_confirm_no":
 					handle_ai_confirm_no(vk, peer_id)
+					continue
+				if action == "ai_style_normal":
+					handle_ai_style_normal(vk, peer_id)
+					continue
+				if action == "ai_style_meme":
+					handle_ai_style_meme(vk, peer_id)
 					continue
 
 				# Обработка слова "привет" для вызова ИИ
