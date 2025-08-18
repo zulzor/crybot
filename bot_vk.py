@@ -25,15 +25,31 @@ MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
 AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
 
+# ---------- Настройки AITunnel ----------
+AITUNNEL_API_URL = os.getenv("AITUNNEL_API_URL", "").strip()
+AITUNNEL_MODEL = os.getenv("AITUNNEL_MODEL", "deepseek-r1-fast").strip()
+AITUNNEL_MODELS = os.getenv("AITUNNEL_MODELS", "").strip()
+
+# Провайдер ИИ: OPENROUTER, AITUNNEL, AUTO
+AI_PROVIDER = os.getenv("AI_PROVIDER", "AUTO").strip().upper()
+
 # ---------- Не даём Windows уснуть ----------
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 
 def prevent_sleep() -> None:
-	ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+	try:
+		if os.name == "nt":
+			ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+	except Exception:
+		pass
 
 def allow_sleep() -> None:
-	ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+	try:
+		if os.name == "nt":
+			ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+	except Exception:
+		pass
 
 atexit.register(allow_sleep)
 
@@ -45,11 +61,13 @@ def configure_logging() -> None:
 	)
 
 
-def load_config() -> Tuple[str, int, str, str]:
+def load_config() -> Tuple[str, int, str, str, str, str]:
 	load_dotenv()
 	token = os.getenv("VK_GROUP_TOKEN", "").strip()
 	group_id_str = os.getenv("VK_GROUP_ID", "").strip()
 	openrouter_key = os.getenv("DEEPSEEK_API_KEY", "").strip()  # ключ OpenRouter
+	aitunnel_key = os.getenv("AITUNNEL_API_KEY", "").strip()
+	ai_provider = os.getenv("AI_PROVIDER", AI_PROVIDER).strip().upper()
 	system_prompt = (
 		os.getenv("AI_SYSTEM_PROMPT", "").strip()
 		or "Ты дружелюбный нейросотрудник сообщества Cry Cat. Отвечай кратко (до 380 символов) и по делу на русском. Если спрашивают про бота — есть игры «Мафия», «Угадай число» и режим «ИИ‑чат»."
@@ -58,7 +76,7 @@ def load_config() -> Tuple[str, int, str, str]:
 		raise RuntimeError("VK_GROUP_TOKEN is not set in .env")
 	if not group_id_str.isdigit():
 		raise RuntimeError("VK_GROUP_ID must be a number (без минуса)")
-	return token, int(group_id_str), openrouter_key, system_prompt
+	return token, int(group_id_str), openrouter_key, system_prompt, aitunnel_key, ai_provider
 
 
 # ---------- Мафия: лобби ----------
@@ -217,6 +235,13 @@ def get_model_candidates() -> List[str]:
 	return [model]
 
 
+def get_aitunnel_model_candidates() -> List[str]:
+	models_csv = AITUNNEL_MODELS
+	if models_csv:
+		return [m.strip() for m in models_csv.split(",") if m.strip()]
+	return [AITUNNEL_MODEL]
+
+
 # ---------- DeepSeek через OpenRouter (с авто‑переключением моделей) ----------
 def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str) -> str:
 	if not api_key:
@@ -273,17 +298,80 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
 
 
-def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
-	if is_dm:
-		return True
-	return peer_id in AI_ACTIVE_CHATS
+def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str) -> str:
+	if not api_key:
+		return "ИИ не настроен. Добавьте AITUNNEL_API_KEY в .env."
+	if not AITUNNEL_API_URL:
+		return "ИИ не настроен. Добавьте AITUNNEL_API_URL в .env."
+
+	messages = [{"role": "system", "content": system_prompt}]
+	messages.extend(history[-MAX_HISTORY_MESSAGES:])
+	messages.append({"role": "user", "content": user_text})
+
+	logger = logging.getLogger("vk-mafia-bot")
+	last_err = "unknown"
+	for model in get_aitunnel_model_candidates():
+		for attempt in range(2):
+			try:
+				resp = requests.post(
+					AITUNNEL_API_URL,
+					headers={
+						"Authorization": f"Bearer {api_key}",
+						"Content-Type": "application/json",
+					},
+					json={
+						"model": model,
+						"messages": messages,
+						"temperature": 0.6,
+						"max_tokens": 180,
+					},
+					timeout=45,
+				)
+				resp.raise_for_status()
+				data = resp.json()
+				if not isinstance(data, dict) or "choices" not in data or not data["choices"]:
+					last_err = "invalid response (no choices)"
+					break
+				msg = data["choices"][0].get("message", {})
+				text = (msg.get("content") or "").strip()
+				if not text:
+					last_err = "empty content"
+					break
+				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1}")
+				return text
+			except requests.HTTPError as e:
+				code = e.response.status_code if e.response else None
+				last_err = f"HTTP {code}"
+				if code in (429, 500, 502, 503, 504):
+					time.sleep(1 + attempt * 2)
+					continue
+				break
+			except Exception as e:
+				last_err = str(e)
+				break
+		logger.info(f"AI fallback (AITunnel): {last_err} on model={model}")
+	return f"ИИ временно недоступен ({last_err}). Попробуйте позже."
 
 
-def add_history(peer_id: int, role: str, content: str) -> None:
-	h = AI_HISTORY.setdefault(peer_id, [])
-	h.append({"role": role, "content": content})
-	if len(h) > MAX_HISTORY_MESSAGES:
-		del h[: len(h) - MAX_HISTORY_MESSAGES]
+def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str, str]],
+					  openrouter_key: str, aitunnel_key: str, provider: str) -> str:
+	prov = (provider or "AUTO").upper()
+	is_aitunnel_ready = bool(aitunnel_key and AITUNNEL_API_URL)
+	is_openrouter_ready = bool(openrouter_key)
+
+	if prov == "AITUNNEL":
+		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
+	if prov == "OPENROUTER":
+		return deepseek_reply(openrouter_key, system_prompt, history, user_text)
+
+	# AUTO
+	if is_aitunnel_ready:
+		reply = aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
+		if not reply.startswith("ИИ временно недоступен"):
+			return reply
+	if is_openrouter_ready:
+		return deepseek_reply(openrouter_key, system_prompt, history, user_text)
+	return "ИИ не настроен. Добавьте AITUNNEL_API_KEY/AITUNNEL_API_URL или DEEPSEEK_API_KEY в .env."
 
 
 # ---------- Команды ----------
@@ -491,12 +579,29 @@ def handle_ai_off(vk, peer_id: int) -> None:
 	AI_ACTIVE_CHATS.discard(peer_id)
 	send_message(vk, peer_id, "ИИ‑чат выключен для этой беседы.", keyboard=build_main_keyboard())
 
-def handle_ai_message(vk, peer_id: int, user_text: str, api_key: str, system_prompt: str) -> None:
+def handle_ai_message(vk, peer_id: int, user_text: str,
+					  openrouter_key: str, aitunnel_key: str, provider: str,
+					  system_prompt: str) -> None:
 	add_history(peer_id, "user", user_text)
-	reply = deepseek_reply(api_key, system_prompt, AI_HISTORY.get(peer_id, []), user_text)
+	reply = generate_ai_reply(user_text, system_prompt, AI_HISTORY.get(peer_id, []),
+							  openrouter_key, aitunnel_key, provider)
 	reply = clamp_text(reply, MAX_AI_CHARS)
 	add_history(peer_id, "assistant", reply)
 	send_message(vk, peer_id, reply)
+
+
+# ---------- ИИ‑чат утилиты ----------
+def ai_enabled_for_peer(peer_id: int, is_dm: bool) -> bool:
+	if is_dm:
+		return True
+	return peer_id in AI_ACTIVE_CHATS
+
+
+def add_history(peer_id: int, role: str, content: str) -> None:
+	h = AI_HISTORY.setdefault(peer_id, [])
+	h.append({"role": role, "content": content})
+	if len(h) > MAX_HISTORY_MESSAGES:
+		del h[: len(h) - MAX_HISTORY_MESSAGES]
 
 
 # ---------- Основной цикл ----------
@@ -505,10 +610,10 @@ def main() -> None:
 	load_dotenv()
 	prevent_sleep()
 	logger = logging.getLogger("vk-mafia-bot")
-	logger.info(f"AI endpoint: {DEEPSEEK_API_URL}")
-	logger.info(f"AI models: {get_model_candidates()}")
+	logger.info(f"OpenRouter endpoint: {DEEPSEEK_API_URL}")
+	logger.info(f"AITunnel endpoint: {AITUNNEL_API_URL or '(not set)'}")
 	try:
-		token, group_id, openrouter_key, system_prompt = load_config()
+		token, group_id, openrouter_key, system_prompt, aitunnel_key, ai_provider = load_config()
 	except Exception as exc:
 		logger.error("Config error: %s", exc)
 		sys.exit(1)
@@ -517,6 +622,9 @@ def main() -> None:
 	vk = vk_session.get_api()
 	longpoll = VkBotLongPoll(vk_session, group_id)
 
+	logger.info(f"AI provider: {ai_provider}")
+	logger.info(f"OpenRouter models: {get_model_candidates()}")
+	logger.info(f"AITunnel models: {get_aitunnel_model_candidates()}")
 	logger.info("Bot started. Listening for events...")
 
 	for event in longpoll.listen():
@@ -609,7 +717,7 @@ def main() -> None:
 
 		# ИИ‑чат: в личке — всегда; в беседе — только если включён
 		if text_raw and ai_enabled_for_peer(peer_id, is_dm):
-			handle_ai_message(vk, peer_id, text_raw, openrouter_key, system_prompt)
+			handle_ai_message(vk, peer_id, text_raw, openrouter_key, aitunnel_key, ai_provider, system_prompt)
 			continue
 
 		# Ответ о неизвестной команде — только если сообщение похоже на команду
