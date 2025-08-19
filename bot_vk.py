@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import random
+import re
 import ctypes
 import atexit
 import requests
