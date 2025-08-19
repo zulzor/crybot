@@ -900,7 +900,8 @@ YOOMONEY_CONFIG = {
 	"shop_id": os.getenv("YOOMONEY_SHOP_ID", ""),
 	"secret_key": os.getenv("YOOMONEY_SECRET_KEY", ""),
 	"redirect_url": os.getenv("YOOMONEY_REDIRECT_URL", ""),
-	"webhook_url": os.getenv("YOOMONEY_WEBHOOK_URL", "")
+	"webhook_url": os.getenv("YOOMONEY_WEBHOOK_URL", ""),
+	"mode": os.getenv("YOOMONEY_MODE", "PERSONAL")
 }
 
 # Пакеты донатов
@@ -1315,20 +1316,35 @@ def create_donation_link(package_key: str, user_id: int) -> str:
 	package = DONATION_PACKAGES[package_key]
 	
 	# Создаём уникальный ID заказа
-	order_id = f"ORDER_{user_id}_{int(time.time())}"
+	order_id = f"ORDER_{user_id}_{int(time.time())}_{package_key}"
 	
-	# Формируем ссылку для оплаты
-	payment_url = f"https://yoomoney.ru/quickpay/button-widget"
-	payment_url += f"?targets={package['name']}"
-	payment_url += f"&default-sum={package['price']}"
-	payment_url += f"&button-text=11"
-	payment_url += f"&any-card-payment-type=on"
-	payment_url += f"&button-size=m"
-	payment_url += f"&button-color=orange"
-	payment_url += f"&successURL={YOOMONEY_CONFIG['redirect_url']}"
-	payment_url += f"&quickpay=small"
-	payment_url += f"&account={YOOMONEY_CONFIG['shop_id']}"
-	payment_url += f"&order={order_id}"
+	# Для личного кошелька используем форму QuickPay
+	if YOOMONEY_CONFIG.get("mode", "PERSONAL") == "PERSONAL":
+		# Формируем ссылку для оплаты на личный кошелёк
+		payment_url = f"https://yoomoney.ru/quickpay/button-widget"
+		payment_url += f"?targets={package['name']}"
+		payment_url += f"&default-sum={package['price']}"
+		payment_url += f"&button-text=11"
+		payment_url += f"&any-card-payment-type=on"
+		payment_url += f"&button-size=m"
+		payment_url += f"&button-color=orange"
+		payment_url += f"&successURL={YOOMONEY_CONFIG.get('redirect_url', '')}"
+		payment_url += f"&quickpay=small"
+		payment_url += f"&account={YOOMONEY_CONFIG['shop_id']}"
+		payment_url += f"&label={order_id}"
+	else:
+		# Для магазина используем стандартную форму
+		payment_url = f"https://yoomoney.ru/quickpay/button-widget"
+		payment_url += f"?targets={package['name']}"
+		payment_url += f"&default-sum={package['price']}"
+		payment_url += f"&button-text=11"
+		payment_url += f"&any-card-payment-type=on"
+		payment_url += f"&button-size=m"
+		payment_url += f"&button-color=orange"
+		payment_url += f"&successURL={YOOMONEY_CONFIG.get('redirect_url', '')}"
+		payment_url += f"&quickpay=small"
+		payment_url += f"&account={YOOMONEY_CONFIG['shop_id']}"
+		payment_url += f"&order={order_id}"
 	
 	result = f"💳 {package['name']}\n💰 Стоимость: {package['price']} ₽\n🎁 Монет: {package['coins']}"
 	if package['bonus'] > 0:
