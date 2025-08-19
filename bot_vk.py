@@ -58,7 +58,7 @@ load_dotenv()
 # ---------- Настройки OpenRouter (DeepSeek) ----------
 DEEPSEEK_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEEPSEEK_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324:free")
-OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "deepseek/deepseek-chat-v3-0324:free,deepseek/deepseek-r1-0528:free,qwen/qwen3-coder:free,deepseek/deepseek-r1:free").strip()
+OPENROUTER_MODELS = os.getenv("OPENROUTER_MODELS", "deepseek/deepseek-r1-distill-llama-70b:free,deepseek/deepseek-chat-v3-0324:free,deepseek/deepseek-r1-0528:free,qwen/qwen3-coder:free,deepseek/deepseek-r1:free").strip()
 MAX_HISTORY_MESSAGES = 8
 MAX_AI_CHARS = 380
 AI_REFERER = os.getenv("OPENROUTER_REFERER", "https://vk.com/crycat_memes")
@@ -67,7 +67,7 @@ AI_TITLE = os.getenv("OPENROUTER_TITLE", "Cry Cat Bot")
 # ---------- Настройки AITunnel ----------
 AITUNNEL_API_URL = os.getenv("AITUNNEL_API_URL", "").strip()
 AITUNNEL_MODEL = os.getenv("AITUNNEL_MODEL", "deepseek-r1-fast").strip()
-AITUNNEL_MODELS = os.getenv("AITUNNEL_MODELS", "").strip()
+AITUNNEL_MODELS = os.getenv("AITUNNEL_MODELS", "gpt-5-nano,gpt-3.5-turbo,deepseek-chat,gemini-flash-1.5-8b").strip()
 
 # Провайдер ИИ: OPENROUTER, AITUNNEL, AUTO
 AI_PROVIDER = os.getenv("AI_PROVIDER", "AITUNNEL").strip().upper()
@@ -1673,18 +1673,21 @@ def build_admin_keyboard() -> str:
 def build_ai_models_keyboard() -> str:
 	"""Клавиатура для выбора AI моделей"""
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
-	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
-	keyboard.add_line()
-	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek-chat"})
-	keyboard.add_line()
+	# OpenRouter бесплатные
+	keyboard.add_button("deepseek-r1-distill", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-distill-llama-70b:free"})
 	keyboard.add_button("deepseek-chat-v3", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-chat-v3-0324:free"})
-	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
 	keyboard.add_line()
+	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
 	keyboard.add_button("qwen3-coder", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "qwen/qwen3-coder:free"})
+	keyboard.add_line()
 	keyboard.add_button("deepseek-r1-free", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1:free"})
 	keyboard.add_line()
-	keyboard.add_button("deepseek-r1", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek-r1"})
+	# AITunnel платные
+	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
+	keyboard.add_button("gpt-3.5-turbo", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gpt-3.5-turbo"})
+	keyboard.add_line()
+	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "deepseek-chat"})
+	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
 	keyboard.add_line()
 	keyboard.add_button("Текущая модель", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
 	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
@@ -3057,6 +3060,31 @@ def main() -> None:
 			send_message(vk, peer_id, help_msg)
 			continue
 
+		# Админ-панель: основные разделы
+		if action == "admin":
+			handle_admin_panel(vk, peer_id, user_id)
+			continue
+		if action == "admin_ai_models":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Выберите ИИ модель:", keyboard=build_ai_models_keyboard())
+			continue
+		if action == "admin_users":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Управление пользователями:", keyboard=build_users_management_keyboard())
+			continue
+		if action == "admin_moderation":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Модерация:", keyboard=build_moderation_keyboard())
+			continue
+		if action == "admin_system":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Системные функции: (в разработке)", keyboard=build_admin_keyboard())
+			continue
+		if action == "admin_back":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "Админ‑панель:", keyboard=build_admin_keyboard())
+			continue
+		
 		# Админ-панель: выбор модели
 		if action == "admin_set_model":
 			model_name = payload.get("model") if isinstance(payload, dict) else None
@@ -3067,7 +3095,7 @@ def main() -> None:
 			continue
 		if action == "admin_close":
 			if user_id in ADMIN_USER_IDS:
-				send_message(vk, peer_id, "Админ‑панель закрыта.", keyboard=build_main_keyboard())
+				send_message(vk, peer_id, "Админ‑панель закрыта.", keyboard=build_dm_keyboard() if peer_id < 2000000000 else build_main_keyboard())
 			continue
 		
 		# Обработка согласий на конфиденциальность
