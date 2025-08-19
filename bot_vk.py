@@ -1963,7 +1963,7 @@ def get_aitunnel_model_candidates() -> List[str]:
 
 
 # ---------- DeepSeek через OpenRouter (с авто‑переключением моделей) ----------
-def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str) -> str:
+def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str, aitunnel_key: str = "") -> str:
 	if not api_key:
 		return "ИИ не настроен. Добавьте DEEPSEEK_API_KEY в .env."
 	messages = [{"role": "system", "content": system_prompt}]
@@ -2122,7 +2122,7 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 	if prov == "AITUNNEL":
 		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
 	if prov == "OPENROUTER":
-		return deepseek_reply(openrouter_key, system_prompt, history, user_text)
+		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
 
 	# AUTO
 	if is_aitunnel_ready:
@@ -2130,7 +2130,7 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 		if not reply.startswith("ИИ временно недоступен"):
 			return reply
 	if is_openrouter_ready:
-		return deepseek_reply(openrouter_key, system_prompt, history, user_text)
+		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
 	return "ИИ не настроен. Добавьте AITUNNEL_API_KEY/AITUNNEL_API_URL или DEEPSEEK_API_KEY в .env."
 
 
