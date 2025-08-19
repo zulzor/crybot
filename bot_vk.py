@@ -811,6 +811,57 @@ class BusinessProfile:
 	total_earned: int = 0
 	prestige_level: int = 1
 	prestige_points: int = 0
+	# Новые поля для вовлечения
+	achievements: Set[str] = field(default_factory=set)
+	last_daily_bonus: float = 0
+	daily_streak: int = 0
+	vip_level: int = 0
+	vip_expires: float = 0
+	referral_code: str = ""
+	referred_by: str = ""
+	referral_earnings: int = 0
+	season_points: int = 0
+	last_season_reset: float = 0
+
+# Система достижений
+ACHIEVEMENTS = {
+	"first_asset": {"name": "🎯 Первый шаг", "description": "Купить первый актив", "reward": 100},
+	"millionaire": {"name": "💰 Миллионер", "description": "Накопить 1,000,000 монет", "reward": 1000},
+	"billionaire": {"name": "💎 Миллиардер", "description": "Накопить 1,000,000,000 монет", "reward": 10000},
+	"prestige_master": {"name": "🌟 Мастер престижа", "description": "Достичь 5 уровня престижа", "reward": 5000},
+	"asset_collector": {"name": "🏪 Коллекционер", "description": "Купить все активы", "reward": 2500},
+	"daily_player": {"name": "📅 Ежедневный игрок", "description": "7 дней подряд заходить", "reward": 500},
+	"upgrade_king": {"name": "🔧 Король улучшений", "description": "Улучшить актив до максимума", "reward": 1000},
+	"income_legend": {"name": "📈 Легенда дохода", "description": "Заработать 1,000,000,000/час", "reward": 15000}
+}
+
+# VIP уровни и бонусы
+VIP_LEVELS = {
+	1: {"name": "🥉 Бронзовый VIP", "cost": 100, "multiplier": 1.2, "daily_bonus": 200, "color": "🟠"},
+	2: {"name": "🥈 Серебряный VIP", "cost": 500, "multiplier": 1.5, "daily_bonus": 500, "color": "⚪"},
+	3: {"name": "🥇 Золотой VIP", "cost": 1000, "multiplier": 2.0, "daily_bonus": 1000, "color": "🟡"},
+	4: {"name": "💎 Алмазный VIP", "cost": 5000, "multiplier": 3.0, "daily_bonus": 2500, "color": "🔵"},
+	5: {"name": "👑 Легендарный VIP", "cost": 10000, "multiplier": 5.0, "daily_bonus": 5000, "color": "🟣"}
+}
+
+# Ежедневные бонусы
+DAILY_BONUSES = {
+	1: {"coins": 100, "multiplier": 1.0},
+	2: {"coins": 200, "multiplier": 1.1},
+	3: {"coins": 300, "multiplier": 1.2},
+	4: {"coins": 400, "multiplier": 1.3},
+	5: {"coins": 500, "multiplier": 1.4},
+	6: {"coins": 600, "multiplier": 1.5},
+	7: {"coins": 700, "multiplier": 2.0}  # Бонус за неделю
+}
+
+# Сезонные события
+SEASON_EVENTS = {
+	"spring": {"name": "🌸 Весенний бум", "multiplier": 1.5, "duration": 30},
+	"summer": {"name": "☀️ Летний рост", "multiplier": 2.0, "duration": 30},
+	"autumn": {"name": "🍂 Осенний урожай", "multiplier": 1.8, "duration": 30},
+	"winter": {"name": "❄️ Зимняя магия", "multiplier": 2.5, "duration": 30}
+}
 
 # База бизнес-профилей
 BUSINESS_PROFILES: Dict[int, BusinessProfile] = {}
@@ -844,11 +895,31 @@ PRESTIGE_LEVELS = {
 	10: {"name": "Бог бизнеса", "multiplier": 1000.0}
 }
 
+# YooMoney интеграция
+YOOMONEY_CONFIG = {
+	"shop_id": os.getenv("YOOMONEY_SHOP_ID", ""),
+	"secret_key": os.getenv("YOOMONEY_SECRET_KEY", ""),
+	"redirect_url": os.getenv("YOOMONEY_REDIRECT_URL", ""),
+	"webhook_url": os.getenv("YOOMONEY_WEBHOOK_URL", "")
+}
+
+# Пакеты донатов
+DONATION_PACKAGES = {
+	"starter": {"name": "🚀 Стартовый пакет", "coins": 1000, "price": 99, "bonus": 0},
+	"popular": {"name": "⭐ Популярный пакет", "coins": 5000, "price": 399, "bonus": 200},
+	"premium": {"name": "💎 Премиум пакет", "coins": 15000, "price": 999, "bonus": 1000},
+	"legendary": {"name": "👑 Легендарный пакет", "coins": 50000, "price": 2999, "bonus": 5000},
+	"ultimate": {"name": "🌌 Космический пакет", "coins": 100000, "price": 4999, "bonus": 15000}
+}
+
 
 def get_business_profile(user_id: int) -> BusinessProfile:
 	"""Получить или создать бизнес-профиль пользователя"""
 	if user_id not in BUSINESS_PROFILES:
-		BUSINESS_PROFILES[user_id] = BusinessProfile(user_id=user_id)
+		profile = BusinessProfile(user_id=user_id)
+		# Генерируем уникальный реферальный код
+		profile.referral_code = f"REF{user_id}{random.randint(1000, 9999)}"
+		BUSINESS_PROFILES[user_id] = profile
 	return BUSINESS_PROFILES[user_id]
 
 
@@ -861,6 +932,26 @@ def calculate_income(profile: BusinessProfile) -> int:
 		# Доход зависит от уровня актива и престижа
 		prestige_multiplier = PRESTIGE_LEVELS[profile.prestige_level]["multiplier"]
 		asset_income = asset.income_per_hour * asset.level * prestige_multiplier
+		
+		# VIP множитель
+		if profile.vip_level > 0 and profile.vip_expires > current_time:
+			vip_info = VIP_LEVELS[profile.vip_level]
+			asset_income *= vip_info["multiplier"]
+		
+		# Сезонный множитель
+		month = time.localtime(current_time).tm_mon
+		if month in [3, 4, 5]:
+			season = "spring"
+		elif month in [6, 7, 8]:
+			season = "summer"
+		elif month in [9, 10, 11]:
+			season = "autumn"
+		else:
+			season = "winter"
+		
+		season_info = SEASON_EVENTS[season]
+		asset_income *= season_info["multiplier"]
+		
 		total_income += asset_income
 	
 	return int(total_income)
@@ -890,7 +981,15 @@ def collect_income(user_id: int) -> str:
 	profile.total_earned += income
 	profile.last_income_time = current_time
 	
-	return f"💰 Собрано {income} монет! Баланс: {profile.money}"
+	# Проверяем достижения
+	achievements = check_achievements(user_id)
+	
+	result = f"💰 Собрано {income} монет! Баланс: {profile.money}"
+	
+	if achievements:
+		result += "\n\n🏆 Новые достижения:\n" + "\n".join(achievements)
+	
+	return result
 
 
 def buy_asset(user_id: int, asset_key: str) -> str:
@@ -984,6 +1083,7 @@ def get_business_status(user_id: int) -> str:
 	"""Получить статус бизнеса пользователя"""
 	profile = get_business_profile(user_id)
 	prestige_info = PRESTIGE_LEVELS[profile.prestige_level]
+	current_time = time.time()
 	
 	status = f"🏢 Бизнес-империя {mention(user_id, 'игрока')}\n\n"
 	status += f"💰 Баланс: {profile.money} монет\n"
@@ -991,12 +1091,49 @@ def get_business_status(user_id: int) -> str:
 	status += f"📈 Всего заработано: {profile.total_earned} монет\n"
 	status += f"⏰ Доход в час: {calculate_income(profile)} монет\n\n"
 	
+	# VIP статус
+	if profile.vip_level > 0 and profile.vip_expires > current_time:
+		vip_info = VIP_LEVELS[profile.vip_level]
+		remaining = profile.vip_expires - current_time
+		days = int(remaining // 86400)
+		status += f"👑 {vip_info['name']} (осталось {days}д)\n"
+		status += f"📈 VIP множитель: x{vip_info['multiplier']}\n\n"
+	
+	# Ежедневный бонус
+	if profile.last_daily_bonus > 0:
+		time_diff = current_time - profile.last_daily_bonus
+		if time_diff >= 86400:  # 24 часа
+			status += f"🎁 Ежедневный бонус доступен! (день {profile.daily_streak + 1})\n\n"
+		else:
+			remaining = 86400 - time_diff
+			hours = int(remaining // 3600)
+			minutes = int((remaining % 3600) // 60)
+			status += f"⏰ Следующий бонус через {hours}ч {minutes}м\n\n"
+	
+	# Сезонная информация
+	month = time.localtime(current_time).tm_mon
+	if month in [3, 4, 5]:
+		season = "spring"
+	elif month in [6, 7, 8]:
+		season = "summer"
+	elif month in [9, 10, 11]:
+		season = "autumn"
+	else:
+		season = "winter"
+	
+	season_info = SEASON_EVENTS[season]
+	status += f"🌍 {season_info['name']} (x{season_info['multiplier']})\n\n"
+	
 	if profile.assets:
 		status += "🏪 Ваши активы:\n"
 		for asset_key, asset in profile.assets.items():
 			status += f"• {asset.name} (Ур.{asset.level}) - {asset.income_per_hour} монет/час\n"
 	else:
-		status += "❌ У вас пока нет активов"
+		status += "❌ У вас пока нет активов\n"
+	
+	# Достижения
+	if profile.achievements:
+		status += f"\n🏆 Достижения: {len(profile.achievements)}/{len(ACHIEVEMENTS)}"
 	
 	return status
 
@@ -1019,6 +1156,297 @@ def get_business_shop() -> str:
 	shop += "• /business - статус бизнеса"
 	
 	return shop
+
+
+def check_achievements(user_id: int) -> List[str]:
+	"""Проверяет и выдаёт достижения пользователю"""
+	profile = get_business_profile(user_id)
+	new_achievements = []
+	
+	# Проверяем каждое достижение
+	if "first_asset" not in profile.achievements and len(profile.assets) >= 1:
+		profile.achievements.add("first_asset")
+		profile.money += ACHIEVEMENTS["first_asset"]["reward"]
+		new_achievements.append(f"🎯 {ACHIEVEMENTS['first_asset']['name']} (+{ACHIEVEMENTS['first_asset']['reward']} монет)")
+	
+	if "millionaire" not in profile.achievements and profile.money >= 1000000:
+		profile.achievements.add("millionaire")
+		profile.money += ACHIEVEMENTS["millionaire"]["reward"]
+		new_achievements.append(f"💰 {ACHIEVEMENTS['millionaire']['name']} (+{ACHIEVEMENTS['millionaire']['reward']} монет)")
+	
+	if "billionaire" not in profile.achievements and profile.money >= 1000000000:
+		profile.achievements.add("billionaire")
+		profile.money += ACHIEVEMENTS["billionaire"]["reward"]
+		new_achievements.append(f"💎 {ACHIEVEMENTS['billionaire']['name']} (+{ACHIEVEMENTS['billionaire']['reward']} монет)")
+	
+	if "prestige_master" not in profile.achievements and profile.prestige_level >= 5:
+		profile.achievements.add("prestige_master")
+		profile.money += ACHIEVEMENTS["prestige_master"]["reward"]
+		new_achievements.append(f"🌟 {ACHIEVEMENTS['prestige_master']['name']} (+{ACHIEVEMENTS['prestige_master']['reward']} монет)")
+	
+	if "asset_collector" not in profile.achievements and len(profile.assets) >= len(BUSINESS_ASSETS):
+		profile.achievements.add("asset_collector")
+		profile.money += ACHIEVEMENTS["asset_collector"]["reward"]
+		new_achievements.append(f"🏪 {ACHIEVEMENTS['asset_collector']['name']} (+{ACHIEVEMENTS['asset_collector']['reward']} монет)")
+	
+	if "daily_player" not in profile.achievements and profile.daily_streak >= 7:
+		profile.achievements.add("daily_player")
+		profile.money += ACHIEVEMENTS["daily_player"]["reward"]
+		new_achievements.append(f"📅 {ACHIEVEMENTS['daily_player']['name']} (+{ACHIEVEMENTS['daily_player']['reward']} монет)")
+	
+	# Проверяем улучшения
+	for asset in profile.assets.values():
+		if "upgrade_king" not in profile.achievements and asset.level >= asset.max_level:
+			profile.achievements.add("upgrade_king")
+			profile.money += ACHIEVEMENTS["upgrade_king"]["reward"]
+			new_achievements.append(f"🔧 {ACHIEVEMENTS['upgrade_king']['name']} (+{ACHIEVEMENTS['upgrade_king']['reward']} монет)")
+			break
+	
+	# Проверяем доход
+	hourly_income = calculate_income(profile)
+	if "income_legend" not in profile.achievements and hourly_income >= 1000000000:
+		profile.achievements.add("income_legend")
+		profile.money += ACHIEVEMENTS["income_legend"]["reward"]
+		new_achievements.append(f"📈 {ACHIEVEMENTS['income_legend']['name']} (+{ACHIEVEMENTS['income_legend']['reward']} монет)")
+	
+	return new_achievements
+
+
+def claim_daily_bonus(user_id: int) -> str:
+	"""Забирает ежедневный бонус"""
+	profile = get_business_profile(user_id)
+	current_time = time.time()
+	
+	# Проверяем, прошло ли 24 часа
+	if profile.last_daily_bonus > 0:
+		time_diff = current_time - profile.last_daily_bonus
+		if time_diff < 86400:  # 24 часа
+			remaining = 86400 - time_diff
+			hours = int(remaining // 3600)
+			minutes = int((remaining % 3600) // 60)
+			return f"⏰ Следующий бонус через {hours}ч {minutes}м"
+	
+	# Увеличиваем стрик
+	profile.daily_streak += 1
+	if profile.daily_streak > 7:
+		profile.daily_streak = 1
+	
+	# Выдаём бонус
+	bonus_info = DAILY_BONUSES.get(profile.daily_streak, DAILY_BONUSES[7])
+	bonus_coins = bonus_info["coins"]
+	bonus_multiplier = bonus_info["multiplier"]
+	
+	# VIP бонус
+	if profile.vip_level > 0 and profile.vip_expires > current_time:
+		vip_info = VIP_LEVELS[profile.vip_level]
+		bonus_coins += vip_info["daily_bonus"]
+		bonus_multiplier *= vip_info["multiplier"]
+	
+	# Применяем множитель
+	final_bonus = int(bonus_coins * bonus_multiplier)
+	profile.money += final_bonus
+	profile.last_daily_bonus = current_time
+	
+	# Проверяем достижения
+	achievements = check_achievements(user_id)
+	
+	result = f"🎁 Ежедневный бонус! День {profile.daily_streak}\n"
+	result += f"💰 Получено: {final_bonus} монет\n"
+	if profile.vip_level > 0:
+		result += f"👑 VIP бонус: +{VIP_LEVELS[profile.vip_level]['daily_bonus']} монет\n"
+	result += f"📊 Баланс: {profile.money} монет"
+	
+	if achievements:
+		result += "\n\n🏆 Новые достижения:\n" + "\n".join(achievements)
+	
+	return result
+
+
+def buy_vip(user_id: int, vip_level: int) -> str:
+	"""Покупает VIP статус"""
+	profile = get_business_profile(user_id)
+	
+	if vip_level not in VIP_LEVELS:
+		return "❌ Неверный уровень VIP"
+	
+	vip_info = VIP_LEVELS[vip_level]
+	
+	if profile.money < vip_info["cost"]:
+		return f"❌ Недостаточно денег. Нужно: {vip_info['cost']}, у вас: {profile.money}"
+	
+	# Покупаем VIP
+	profile.money -= vip_info["cost"]
+	profile.vip_level = vip_level
+	profile.vip_expires = time.time() + (30 * 24 * 3600)  # 30 дней
+	
+	return f"👑 Поздравляем! Вы получили {vip_info['name']} на 30 дней!\n💰 Баланс: {profile.money} монет"
+
+
+def get_vip_info(user_id: int) -> str:
+	"""Показывает информацию о VIP статусе"""
+	profile = get_business_profile(user_id)
+	current_time = time.time()
+	
+	if profile.vip_level == 0 or profile.vip_expires <= current_time:
+		return "❌ У вас нет активного VIP статуса"
+	
+	vip_info = VIP_LEVELS[profile.vip_level]
+	remaining = profile.vip_expires - current_time
+	days = int(remaining // 86400)
+	hours = int((remaining % 86400) // 3600)
+	
+	result = f"{vip_info['color']} {vip_info['name']}\n"
+	result += f"⏰ Осталось: {days}д {hours}ч\n"
+	result += f"📈 Множитель дохода: x{vip_info['multiplier']}\n"
+	result += f"🎁 Ежедневный бонус: +{vip_info['daily_bonus']} монет\n"
+	result += f"💰 Стоимость продления: {vip_info['cost']} монет"
+	
+	return result
+
+
+def create_donation_link(package_key: str, user_id: int) -> str:
+	"""Создаёт ссылку для доната через YooMoney"""
+	if not YOOMONEY_CONFIG["shop_id"]:
+		return "❌ Система донатов временно недоступна"
+	
+	if package_key not in DONATION_PACKAGES:
+		return "❌ Неверный пакет"
+	
+	package = DONATION_PACKAGES[package_key]
+	
+	# Создаём уникальный ID заказа
+	order_id = f"ORDER_{user_id}_{int(time.time())}"
+	
+	# Формируем ссылку для оплаты
+	payment_url = f"https://yoomoney.ru/quickpay/button-widget"
+	payment_url += f"?targets={package['name']}"
+	payment_url += f"&default-sum={package['price']}"
+	payment_url += f"&button-text=11"
+	payment_url += f"&any-card-payment-type=on"
+	payment_url += f"&button-size=m"
+	payment_url += f"&button-color=orange"
+	payment_url += f"&successURL={YOOMONEY_CONFIG['redirect_url']}"
+	payment_url += f"&quickpay=small"
+	payment_url += f"&account={YOOMONEY_CONFIG['shop_id']}"
+	payment_url += f"&order={order_id}"
+	
+	result = f"💳 {package['name']}\n💰 Стоимость: {package['price']} ₽\n🎁 Монет: {package['coins']}"
+	if package['bonus'] > 0:
+		result += f"\n🎉 Бонус: +{package['bonus']} монет"
+	result += f"\n\n🔗 Ссылка для оплаты:\n{payment_url}"
+	
+	return result
+
+
+def process_donation_payment(order_id: str, amount: float, user_id: int) -> str:
+	"""Обрабатывает успешную оплату доната"""
+	# Здесь должна быть логика проверки платежа через YooMoney API
+	# Пока что просто симулируем успешную оплату
+	
+	profile = get_business_profile(user_id)
+	
+	# Определяем пакет по сумме
+	package_coins = 0
+	package_bonus = 0
+	
+	for package in DONATION_PACKAGES.values():
+		if package["price"] == amount:
+			package_coins = package["coins"]
+			package_bonus = package["bonus"]
+			break
+	
+	if package_coins == 0:
+		return "❌ Ошибка обработки платежа"
+	
+	# Зачисляем монеты
+	total_coins = package_coins + package_bonus
+	profile.money += total_coins
+	
+	# Логируем донат
+	logging.info(f"Донат: пользователь {user_id} получил {total_coins} монет за {amount} ₽")
+	
+	return f"🎉 Спасибо за поддержку!\n💰 Получено: {total_coins} монет\n📊 Новый баланс: {profile.money} монет"
+
+
+def get_referral_info(user_id: int) -> str:
+	"""Показывает информацию о рефералах"""
+	profile = get_business_profile(user_id)
+	
+	result = f"👥 Реферальная система\n\n"
+	result += f"🔗 Ваш код: {profile.referral_code}\n"
+	result += f"💰 Заработано с рефералов: {profile.referral_earnings} монет\n\n"
+	
+	if profile.referred_by:
+		result += f"📥 Вы приглашены кодом: {profile.referred_by}\n"
+	
+	result += "💡 Как это работает:\n"
+	result += "• Поделитесь своим кодом с друзьями\n"
+	result += "• За каждого приглашённого получаете 10% от их донатов\n"
+	result += "• Рефералы получают +20% к ежедневным бонусам"
+	
+	return result
+
+
+def use_referral_code(user_id: int, code: str) -> str:
+	"""Использует реферальный код"""
+	profile = get_business_profile(user_id)
+	
+	if profile.referred_by:
+		return "❌ Вы уже использовали реферальный код"
+	
+	if profile.referral_code == code:
+		return "❌ Нельзя использовать свой код"
+	
+	# Ищем пользователя с таким кодом
+	referrer_id = None
+	for uid, prof in BUSINESS_PROFILES.items():
+		if prof.referral_code == code:
+			referrer_id = uid
+			break
+	
+	if not referrer_id:
+		return "❌ Неверный реферальный код"
+	
+	# Активируем реферальный код
+	profile.referred_by = code
+	referrer_profile = BUSINESS_PROFILES[referrer_id]
+	
+	# Даём бонусы
+	profile.money += 500  # Бонус за использование кода
+	referrer_profile.money += 1000  # Бонус за приглашение
+	
+	return f"✅ Реферальный код активирован!\n💰 Бонус: +500 монет\n👥 Пригласил: {mention(referrer_id, 'игрок')}"
+
+
+def get_season_info() -> str:
+	"""Показывает информацию о текущем сезоне"""
+	current_time = time.time()
+	
+	# Определяем текущий сезон
+	month = time.localtime(current_time).tm_mon
+	if month in [3, 4, 5]:
+		season = "spring"
+	elif month in [6, 7, 8]:
+		season = "summer"
+	elif month in [9, 10, 11]:
+		season = "autumn"
+	else:
+		season = "winter"
+	
+	season_info = SEASON_EVENTS[season]
+	
+	result = f"🌍 Сезонное событие: {season_info['name']}\n"
+	result += f"📈 Множитель дохода: x{season_info['multiplier']}\n"
+	result += f"⏰ Длительность: {season_info['duration']} дней\n\n"
+	
+	result += "🏆 Сезонные награды:\n"
+	result += "• Топ-1: 100,000 монет + VIP на месяц\n"
+	result += "• Топ-3: 50,000 монет + VIP на неделю\n"
+	result += "• Топ-10: 25,000 монет\n"
+	result += "• Топ-50: 10,000 монет"
+	
+	return result
+
 
 # ---------- Викторина состояния ----------
 @dataclass
@@ -1175,14 +1603,21 @@ def build_business_keyboard() -> str:
 	"""Клавиатура для бизнес-игры"""
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("💰 Собрать доход", color=VkKeyboardColor.POSITIVE, payload={"action": "business_collect"})
-	keyboard.add_button("🏪 Магазин", color=VkKeyboardColor.PRIMARY, payload={"action": "business_shop"})
+	keyboard.add_button("🎁 Ежедневный бонус", color=VkKeyboardColor.POSITIVE, payload={"action": "business_daily"})
 	keyboard.add_line()
-	keyboard.add_button("📊 Статус", color=VkKeyboardColor.PRIMARY, payload={"action": "business_status"})
+	keyboard.add_button("🏪 Магазин", color=VkKeyboardColor.PRIMARY, payload={"action": "business_shop"})
 	keyboard.add_button("🔧 Улучшить", color=VkKeyboardColor.PRIMARY, payload={"action": "business_upgrade"})
 	keyboard.add_line()
-	keyboard.add_button("🌟 Престиж", color=VkKeyboardColor.SECONDARY, payload={"action": "business_prestige"})
-	keyboard.add_button("🏆 Топ", color=VkKeyboardColor.SECONDARY, payload={"action": "business_top"})
+	keyboard.add_button("👑 VIP статус", color=VkKeyboardColor.SECONDARY, payload={"action": "business_vip"})
+	keyboard.add_button("💳 Донаты", color=VkKeyboardColor.SECONDARY, payload={"action": "business_donate"})
 	keyboard.add_line()
+	keyboard.add_button("📊 Статус", color=VkKeyboardColor.PRIMARY, payload={"action": "business_status"})
+	keyboard.add_button("🌟 Престиж", color=VkKeyboardColor.SECONDARY, payload={"action": "business_prestige"})
+	keyboard.add_line()
+	keyboard.add_button("👥 Рефералы", color=VkKeyboardColor.PRIMARY, payload={"action": "business_referral"})
+	keyboard.add_button("🌍 Сезон", color=VkKeyboardColor.PRIMARY, payload={"action": "business_season"})
+	keyboard.add_line()
+	keyboard.add_button("🏆 Топ", color=VkKeyboardColor.SECONDARY, payload={"action": "business_top"})
 	keyboard.add_button("← Назад", color=VkKeyboardColor.NEGATIVE, payload={"action": "show_main_menu"})
 	return keyboard.get_keyboard()
 
@@ -1220,6 +1655,42 @@ def build_business_shop_keyboard() -> str:
 	keyboard.add_button("🌌 Вселенная", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_asset", "asset": "universe"})
 	keyboard.add_line()
 	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "business_back"})
+	return keyboard.get_keyboard()
+
+
+def build_vip_keyboard() -> str:
+	"""Клавиатура для VIP статусов"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	
+	# VIP пакеты
+	keyboard.add_button("🥉 Бронзовый VIP", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_vip", "level": 1})
+	keyboard.add_button("🥈 Серебряный VIP", color=VkKeyboardColor.PRIMARY, payload={"action": "buy_vip", "level": 2})
+	keyboard.add_line()
+	keyboard.add_button("🥇 Золотой VIP", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_vip", "level": 3})
+	keyboard.add_button("💎 Алмазный VIP", color=VkKeyboardColor.POSITIVE, payload={"action": "buy_vip", "level": 4})
+	keyboard.add_line()
+	keyboard.add_button("👑 Легендарный VIP", color=VkKeyboardColor.SECONDARY, payload={"action": "buy_vip", "level": 5})
+	keyboard.add_line()
+	keyboard.add_button("📊 Мой VIP", color=VkKeyboardColor.PRIMARY, payload={"action": "vip_info"})
+	keyboard.add_button("← Назад", color=VkKeyboardColor.NEGATIVE, payload={"action": "business_back"})
+	return keyboard.get_keyboard()
+
+
+def build_donation_keyboard() -> str:
+	"""Клавиатура для донатов"""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	
+	# Пакеты донатов
+	keyboard.add_button("🚀 Стартовый", color=VkKeyboardColor.PRIMARY, payload={"action": "donate_package", "package": "starter"})
+	keyboard.add_button("⭐ Популярный", color=VkKeyboardColor.PRIMARY, payload={"action": "donate_package", "package": "popular"})
+	keyboard.add_line()
+	keyboard.add_button("💎 Премиум", color=VkKeyboardColor.POSITIVE, payload={"action": "donate_package", "package": "premium"})
+	keyboard.add_button("👑 Легендарный", color=VkKeyboardColor.POSITIVE, payload={"action": "donate_package", "package": "legendary"})
+	keyboard.add_line()
+	keyboard.add_button("🌌 Космический", color=VkKeyboardColor.SECONDARY, payload={"action": "donate_package", "package": "ultimate"})
+	keyboard.add_line()
+	keyboard.add_button("💳 Мои покупки", color=VkKeyboardColor.PRIMARY, payload={"action": "donation_history"})
+	keyboard.add_button("← Назад", color=VkKeyboardColor.NEGATIVE, payload={"action": "business_back"})
 	return keyboard.get_keyboard()
 
 
@@ -2250,6 +2721,11 @@ def main() -> None:
 			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		
+		if text in {"/daily", "бонус", "daily", "ежедневный"}:
+			result = claim_daily_bonus(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
 		if text.startswith("/buy "):
 			asset_key = text.split(" ", 1)[1]
 			result = buy_asset(user_id, asset_key)
@@ -2264,6 +2740,31 @@ def main() -> None:
 		
 		if text in {"/prestige", "престиж", "prestige"}:
 			result = prestige_reset(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text in {"/vip", "вип", "VIP"}:
+			result = get_vip_info(user_id)
+			send_message(vk, peer_id, result, keyboard=build_vip_keyboard())
+			continue
+		
+		if text in {"/donate", "донат", "donate"}:
+			send_message(vk, peer_id, "💳 Поддержите развитие игры и получите бонусы!", keyboard=build_donation_keyboard())
+			continue
+		
+		if text in {"/referral", "реферал", "referral"}:
+			result = get_referral_info(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text in {"/season", "сезон", "season"}:
+			result = get_season_info()
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if text.startswith("/referral_code "):
+			code = text.split(" ", 1)[1]
+			result = use_referral_code(user_id, code)
 			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		# Админ-панель по команде в ЛС
@@ -2399,6 +2900,11 @@ def main() -> None:
 			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		
+		if action == "business_daily":
+			result = claim_daily_bonus(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
 		if action == "business_shop":
 			send_message(vk, peer_id, get_business_shop(), keyboard=build_business_shop_keyboard())
 			continue
@@ -2421,6 +2927,24 @@ def main() -> None:
 			
 			upgrade_msg += "\n💡 Используйте: /upgrade [ключ]"
 			send_message(vk, peer_id, upgrade_msg, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_vip":
+			send_message(vk, peer_id, "👑 VIP статусы и их преимущества:", keyboard=build_vip_keyboard())
+			continue
+		
+		if action == "business_donate":
+			send_message(vk, peer_id, "💳 Поддержите развитие игры и получите бонусы!", keyboard=build_donation_keyboard())
+			continue
+		
+		if action == "business_referral":
+			result = get_referral_info(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "business_season":
+			result = get_season_info()
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		
 		if action == "business_prestige":
@@ -2455,6 +2979,30 @@ def main() -> None:
 			if asset_key:
 				result = buy_asset(user_id, asset_key)
 				send_message(vk, peer_id, result, keyboard=build_business_keyboard())
+			continue
+		
+		if action == "buy_vip":
+			vip_level = payload.get("level", 0)
+			if vip_level:
+				result = buy_vip(user_id, int(vip_level))
+				send_message(vk, peer_id, result, keyboard=build_vip_keyboard())
+			continue
+		
+		if action == "vip_info":
+			result = get_vip_info(user_id)
+			send_message(vk, peer_id, result, keyboard=build_vip_keyboard())
+			continue
+		
+		if action == "donate_package":
+			package_key = payload.get("package", "")
+			if package_key:
+				result = create_donation_link(package_key, user_id)
+				send_message(vk, peer_id, result, keyboard=build_donation_keyboard())
+			continue
+		
+		if action == "donation_history":
+			# Пока что просто сообщение, можно расширить
+			send_message(vk, peer_id, "💳 История покупок будет доступна в ближайшее время!", keyboard=build_donation_keyboard())
 			continue
 		
 		if action == "business_back":
