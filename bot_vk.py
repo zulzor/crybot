@@ -1285,8 +1285,17 @@ def buy_vip(user_id: int, vip_level: int) -> str:
 	
 	# Покупаем VIP
 	profile.money -= vip_info["cost"]
-	profile.vip_level = vip_level
-	profile.vip_expires = time.time() + (30 * 24 * 3600)  # 30 дней
+	
+	# Если VIP уже активен, добавляем время к существующему
+	current_time = time.time()
+	if profile.vip_level == vip_level and profile.vip_expires > current_time:
+		# Добавляем 30 дней к существующему VIP
+		profile.vip_expires += (30 * 24 * 3600)
+		return f"👑 VIP продлён! {vip_info['name']} активен ещё на 30 дней!\n💰 Баланс: {profile.money} монет"
+	else:
+		# Устанавливаем новый VIP или заменяем старый
+		profile.vip_level = vip_level
+		profile.vip_expires = current_time + (30 * 24 * 3600)  # 30 дней
 	
 	return f"👑 Поздравляем! Вы получили {vip_info['name']} на 30 дней!\n💰 Баланс: {profile.money} монет"
 
@@ -1309,6 +1318,83 @@ def get_vip_info(user_id: int) -> str:
 	result += f"📈 Множитель дохода: x{vip_info['multiplier']}\n"
 	result += f"🎁 Ежедневный бонус: +{vip_info['daily_bonus']} монет\n"
 	result += f"💰 Стоимость продления: {vip_info['cost']} монет"
+	
+	return result
+
+
+def cancel_vip(user_id: int) -> str:
+	"""Отменяет VIP статус с частичным возвратом денег"""
+	profile = get_business_profile(user_id)
+	current_time = time.time()
+	
+	if profile.vip_level == 0 or profile.vip_expires <= current_time:
+		return "❌ У вас нет активного VIP статуса"
+	
+	vip_info = VIP_LEVELS[profile.vip_level]
+	
+	# Рассчитываем оставшееся время и возвращаем пропорциональную часть денег
+	remaining = profile.vip_expires - current_time
+	total_duration = 30 * 24 * 3600  # 30 дней в секундах
+	remaining_days = remaining / 86400
+	
+	# Возвращаем 50% от стоимости за оставшиеся дни
+	refund_amount = int((vip_info['cost'] * 0.5) * (remaining_days / 30))
+	
+	# Отменяем VIP
+	profile.vip_level = 0
+	profile.vip_expires = 0
+	
+	# Возвращаем деньги
+	profile.money += refund_amount
+	
+	return f"❌ VIP статус отменён!\n💰 Возвращено: {refund_amount} монет\n💰 Баланс: {profile.money} монет"
+
+
+def get_business_profile_detailed(user_id: int) -> str:
+	"""Показывает детальный профиль пользователя"""
+	profile = get_business_profile(user_id)
+	current_time = time.time()
+	
+	# Получаем имя пользователя из VK
+	user_name = f"Пользователь {user_id}"
+	try:
+		# Здесь можно добавить получение имени из VK API
+		pass
+	except:
+		pass
+	
+	result = f"👤 **{user_name}**\n"
+	result += f"🆔 ID: {user_id}\n"
+	result += f"💰 Баланс: {profile.money:,} монет\n"
+	result += f"💎 Всего заработано: {profile.total_earned:,} монет\n"
+	result += f"🌟 Уровень престижа: {PRESTIGE_LEVELS[profile.prestige_level]['name']}\n"
+	result += f"📊 Очки престижа: {profile.prestige_points:,}\n"
+	result += f"🏆 Достижений: {len(profile.achievements)}\n"
+	result += f"📅 Дней подряд: {profile.daily_streak}\n"
+	result += f"🌍 Сезонные очки: {profile.season_points:,}\n"
+	result += f"👥 Реферальный код: {profile.referral_code}\n"
+	
+	# VIP статус
+	if profile.vip_level > 0 and profile.vip_expires > current_time:
+		vip_info = VIP_LEVELS[profile.vip_level]
+		remaining = profile.vip_expires - current_time
+		days = int(remaining // 86400)
+		hours = int((remaining % 86400) // 3600)
+		result += f"👑 VIP: {vip_info['name']} (осталось {days}д {hours}ч)\n"
+	else:
+		result += f"👑 VIP: Нет активного статуса\n"
+	
+	# Активы
+	if profile.assets:
+		result += f"\n🏪 **Ваши активы:**\n"
+		total_income_per_hour = 0
+		for asset_id, asset in profile.assets.items():
+			income_per_hour = asset.income_per_hour * (asset.level ** 1.5)
+			total_income_per_hour += income_per_hour
+			result += f"  {asset.name} (ур. {asset.level}): {income_per_hour:,}/час\n"
+		result += f"\n📈 **Общий доход в час: {total_income_per_hour:,} монет**\n"
+	else:
+		result += f"\n🏪 **Активы:** Нет активов\n"
 	
 	return result
 
@@ -1354,10 +1440,12 @@ def create_donation_link(package_key: str, user_id: int) -> str:
 		payment_url += f"&account={YOOMONEY_CONFIG['shop_id']}"
 		payment_url += f"&order={order_id}"
 	
-	result = f"💳 {package['name']}\n💰 Стоимость: {package['price']} ₽\n🎁 Монет: {package['coins']}"
+	result = f"💳 **{package['name']}**\n"
+	result += f"💰 Стоимость: {package['price']} ₽\n"
+	result += f"🎁 Монет: {package['coins']:,}"
 	if package['bonus'] > 0:
-		result += f"\n🎉 Бонус: +{package['bonus']} монет"
-	result += f"\n\n🔗 Ссылка для оплаты:\n{payment_url}"
+		result += f"\n🎉 Бонус: +{package['bonus']:,} монет"
+	result += f"\n\n🔗 **Ссылка для оплаты:**\n{payment_url}"
 	
 	return result
 
@@ -1629,13 +1717,13 @@ def build_business_keyboard() -> str:
 	keyboard.add_button("💰 Собрать доход", color=VkKeyboardColor.POSITIVE, payload={"action": "business_collect"})
 	keyboard.add_button("🎁 Ежедневный бонус", color=VkKeyboardColor.POSITIVE, payload={"action": "business_daily"})
 	keyboard.add_line()
+	keyboard.add_button("📊 Баланс/Профиль", color=VkKeyboardColor.PRIMARY, payload={"action": "business_profile"})
 	keyboard.add_button("🏪 Магазин", color=VkKeyboardColor.PRIMARY, payload={"action": "business_shop"})
+	keyboard.add_line()
 	keyboard.add_button("🔧 Улучшить", color=VkKeyboardColor.PRIMARY, payload={"action": "business_upgrade"})
-	keyboard.add_line()
 	keyboard.add_button("👑 VIP статус", color=VkKeyboardColor.SECONDARY, payload={"action": "business_vip"})
-	keyboard.add_button("💳 Донаты", color=VkKeyboardColor.SECONDARY, payload={"action": "business_donate"})
 	keyboard.add_line()
-	keyboard.add_button("📊 Статус", color=VkKeyboardColor.PRIMARY, payload={"action": "business_status"})
+	keyboard.add_button("💳 Донаты", color=VkKeyboardColor.SECONDARY, payload={"action": "business_donate"})
 	keyboard.add_button("🌟 Престиж", color=VkKeyboardColor.SECONDARY, payload={"action": "business_prestige"})
 	keyboard.add_line()
 	keyboard.add_button("👥 Рефералы", color=VkKeyboardColor.PRIMARY, payload={"action": "business_referral"})
@@ -1696,6 +1784,8 @@ def build_vip_keyboard() -> str:
 	keyboard.add_button("👑 Легендарный VIP", color=VkKeyboardColor.SECONDARY, payload={"action": "buy_vip", "level": 5})
 	keyboard.add_line()
 	keyboard.add_button("📊 Мой VIP", color=VkKeyboardColor.PRIMARY, payload={"action": "vip_info"})
+	keyboard.add_button("❌ Отменить VIP", color=VkKeyboardColor.NEGATIVE, payload={"action": "cancel_vip"})
+	keyboard.add_line()
 	keyboard.add_button("← Назад", color=VkKeyboardColor.NEGATIVE, payload={"action": "business_back"})
 	return keyboard.get_keyboard()
 
@@ -3015,6 +3105,16 @@ def main() -> None:
 		if action == "vip_info":
 			result = get_vip_info(user_id)
 			send_message(vk, peer_id, result, keyboard=build_vip_keyboard())
+			continue
+		
+		if action == "cancel_vip":
+			result = cancel_vip(user_id)
+			send_message(vk, peer_id, result, keyboard=build_vip_keyboard())
+			continue
+		
+		if action == "business_profile":
+			result = get_business_profile_detailed(user_id)
+			send_message(vk, peer_id, result, keyboard=build_business_keyboard())
 			continue
 		
 		if action == "donate_package":
