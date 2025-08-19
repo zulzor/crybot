@@ -964,6 +964,11 @@ def collect_income(user_id: int) -> str:
 	profile = get_business_profile(user_id)
 	current_time = time.time()
 	
+	# Если это первый сбор, устанавливаем текущее время
+	if profile.last_income_time == 0:
+		profile.last_income_time = current_time
+		return "💰 Это ваш первый сбор дохода! Подождите немного, чтобы накопить доход."
+	
 	# Рассчитываем время с последнего сбора
 	time_diff = current_time - profile.last_income_time
 	hours_passed = time_diff / 3600
@@ -1171,11 +1176,13 @@ def check_achievements(user_id: int) -> List[str]:
 		profile.money += ACHIEVEMENTS["first_asset"]["reward"]
 		new_achievements.append(f"🎯 {ACHIEVEMENTS['first_asset']['name']} (+{ACHIEVEMENTS['first_asset']['reward']} монет)")
 	
+	# Проверяем миллионера только если у игрока действительно есть 1M
 	if "millionaire" not in profile.achievements and profile.money >= 1000000:
 		profile.achievements.add("millionaire")
 		profile.money += ACHIEVEMENTS["millionaire"]["reward"]
 		new_achievements.append(f"💰 {ACHIEVEMENTS['millionaire']['name']} (+{ACHIEVEMENTS['millionaire']['reward']} монет)")
 	
+	# Проверяем миллиардера только если у игрока действительно есть 1B
 	if "billionaire" not in profile.achievements and profile.money >= 1000000000:
 		profile.achievements.add("billionaire")
 		profile.money += ACHIEVEMENTS["billionaire"]["reward"]
