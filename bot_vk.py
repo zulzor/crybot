@@ -2121,7 +2121,10 @@ def main() -> None:
 
 		# Команды
 		if text == "/start":
-			send_message(vk, peer_id, "Привет! Выбери игру или включи «ИИ‑чат».", keyboard=build_main_keyboard())
+			if is_dm:
+				send_message(vk, peer_id, "Привет! Это ЛС группы. Выберите режим:", keyboard=build_main_keyboard())
+			else:
+				send_message(vk, peer_id, "Привет! Выбери режим в чате:", keyboard=build_main_keyboard())
 			continue
 
 		# Текстовые синонимы для кнопок
