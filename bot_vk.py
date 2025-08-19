@@ -901,7 +901,8 @@ YOOMONEY_CONFIG = {
 	"secret_key": os.getenv("YOOMONEY_SECRET_KEY", ""),
 	"redirect_url": os.getenv("YOOMONEY_REDIRECT_URL", ""),
 	"webhook_url": os.getenv("YOOMONEY_WEBHOOK_URL", ""),
-	"mode": os.getenv("YOOMONEY_MODE", "PERSONAL")
+	"mode": os.getenv("YOOMONEY_MODE", "PERSONAL"),
+	"notification_secret": os.getenv("YOOMONEY_NOTIFICATION_SECRET", "")
 }
 
 # Пакеты донатов
@@ -1307,7 +1308,7 @@ def get_vip_info(user_id: int) -> str:
 
 def create_donation_link(package_key: str, user_id: int) -> str:
 	"""Создаёт ссылку для доната через YooMoney"""
-	if not YOOMONEY_CONFIG["shop_id"]:
+	if not YOOMONEY_CONFIG["shop_id"] or not YOOMONEY_CONFIG["notification_secret"]:
 		return "❌ Система донатов временно недоступна"
 	
 	if package_key not in DONATION_PACKAGES:
