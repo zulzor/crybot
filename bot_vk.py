@@ -10,6 +10,8 @@ import difflib
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, List, Tuple
+from enum import Enum
+from datetime import datetime
 
 from dotenv import load_dotenv
 import vk_api
