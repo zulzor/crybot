@@ -8,6 +8,7 @@ import atexit
 import requests
 import difflib
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, List, Tuple
 from enum import Enum
@@ -17,6 +18,14 @@ from dotenv import load_dotenv
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+
+# Flask для webhook сервера
+try:
+	from flask import Flask, request, jsonify
+	FLASK_AVAILABLE = True
+except ImportError:
+	FLASK_AVAILABLE = False
+	print("⚠️ Flask не установлен. Webhook сервер недоступен.")
 
 
 # ---------- Система ролей и привилегий ----------
@@ -1468,16 +1477,12 @@ def process_donation_payment(order_id: str, amount: float, user_id: int) -> str:
 			break
 	
 	if package_coins == 0:
-		return "❌ Ошибка обработки платежа"
+		return "❌ Неизвестный пакет доната"
 	
 	# Зачисляем монеты
-	total_coins = package_coins + package_bonus
-	profile.money += total_coins
+	profile.money += package_coins + package_bonus
 	
-	# Логируем донат
-	logging.info(f"Донат: пользователь {user_id} получил {total_coins} монет за {amount} ₽")
-	
-	return f"🎉 Спасибо за поддержку!\n💰 Получено: {total_coins} монет\n📊 Новый баланс: {profile.money} монет"
+	return f"✅ Донат успешно обработан!\n💰 Получено: {package_coins} монет\n🎉 Бонус: {package_bonus} монет\n💰 Новый баланс: {profile.money} монет"
 
 
 def get_referral_info(user_id: int) -> str:
@@ -2701,6 +2706,82 @@ def main() -> None:
 	logger.info(f"OpenRouter models: {get_model_candidates()}")
 	logger.info(f"AITunnel models: {get_aitunnel_model_candidates()}")
 	logger.info("Bot started. Listening for events...")
+
+	# Flask webhook сервер
+	if FLASK_AVAILABLE:
+		app = Flask(__name__)
+		
+		def verify_yoomoney_signature(data: str, signature: str) -> bool:
+			"""Проверяет подпись YooMoney"""
+			if not YOOMONEY_CONFIG.get("notification_secret"):
+				return False
+			
+			import hashlib
+			expected_signature = hashlib.sha1(data.encode()).hexdigest()
+			return signature == expected_signature
+		
+		@app.route('/yoomoney', methods=['POST'])
+		def yoomoney_webhook():
+			"""Webhook для YooMoney уведомлений"""
+			try:
+				data = request.get_data(as_text=True)
+				signature = request.headers.get('X-Signature', '')
+				
+				# Проверяем подпись
+				if not verify_yoomoney_signature(data, signature):
+					return jsonify({"error": "Invalid signature"}), 400
+				
+				# Парсим данные
+				import urllib.parse
+				params = dict(urllib.parse.parse_qsl(data))
+				
+				# Обрабатываем платеж
+				order_id = params.get('label', '')
+				amount = float(params.get('amount', 0))
+				user_id = int(order_id.split('_')[1]) if '_' in order_id else 0
+				
+				if user_id > 0:
+					# Находим пакет по order_id
+					package_key = order_id.split('_')[-1] if '_' in order_id else ''
+					if package_key in DONATION_PACKAGES:
+						package = DONATION_PACKAGES[package_key]
+						# Зачисляем монеты пользователю
+						profile = get_business_profile(user_id)
+						profile.money += package['coins']
+						if package['bonus'] > 0:
+							profile.money += package['bonus']
+						
+						print(f"💰 Донат обработан: пользователь {user_id} получил {package['coins'] + package['bonus']} монет")
+				
+				return jsonify({"status": "success"}), 200
+				
+			except Exception as e:
+				print(f"❌ Ошибка webhook: {e}")
+				return jsonify({"error": str(e)}), 500
+		
+		@app.route('/health', methods=['GET'])
+		def health_check():
+			"""Проверка состояния сервера"""
+			return jsonify({"status": "ok", "service": "yoomoney-webhook"})
+		
+		@app.route('/', methods=['GET'])
+		def root():
+			"""Главная страница"""
+			return "YooMoney Webhook Server работает! 🚀"
+		
+		def start_webhook_server():
+			"""Запускает webhook сервер в отдельном потоке"""
+			try:
+				app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+			except Exception as e:
+				print(f"❌ Ошибка запуска webhook сервера: {e}")
+		
+		# Запускаем webhook сервер в фоне
+		webhook_thread = threading.Thread(target=start_webhook_server, daemon=True)
+		webhook_thread.start()
+		print("🚀 Webhook сервер запущен на порту 5000")
+	else:
+		print("⚠️ Webhook сервер не запущен (Flask недоступен)")
 
 	for event in longpoll.listen():
 		if event.type != VkBotEventType.MESSAGE_NEW:
