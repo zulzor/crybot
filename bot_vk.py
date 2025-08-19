@@ -1087,6 +1087,20 @@ def build_main_keyboard() -> str:
 	return keyboard.get_keyboard()
 
 
+def build_dm_keyboard() -> str:
+	"""Клавиатура для личных сообщений: без Мафии и Кальмара."""
+	keyboard = VkKeyboard(one_time=False, inline=False)
+	keyboard.add_button("🔢 Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
+	keyboard.add_button("❓ Викторина", color=VkKeyboardColor.PRIMARY, payload={"action": "start_quiz"})
+	keyboard.add_line()
+	keyboard.add_button("🏢 Космический Бизнес", color=VkKeyboardColor.POSITIVE, payload={"action": "start_business"})
+	keyboard.add_line()
+	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
+	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	keyboard.add_line()
+	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	return keyboard.get_keyboard()
+
 def build_admin_keyboard() -> str:
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	
@@ -2124,7 +2138,7 @@ def main() -> None:
 		# Команды
 		if text == "/start":
 			if is_dm:
-				send_message(vk, peer_id, "Привет! Это ЛС группы. Выберите режим:", keyboard=build_main_keyboard())
+				send_message(vk, peer_id, "Привет! Это ЛС группы. Выберите режим:", keyboard=build_dm_keyboard())
 			else:
 				send_message(vk, peer_id, "Привет! Выбери режим в чате:", keyboard=build_main_keyboard())
 			continue
