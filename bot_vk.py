@@ -22,6 +22,10 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 # Конфигурация и бэкапы
 import config
+from commands.router import (
+    configure_router,
+    dispatch_command,
+)
 
 # Flask для webhook сервера
 try:
@@ -85,6 +89,12 @@ def _parse_admin_ids(csv: str) -> Set[int]:
 	return ids
 
 ADMIN_USER_IDS: Set[int] = _parse_admin_ids(os.getenv("ADMIN_USER_IDS", "").strip())
+
+# Настройка роутера команд: единая проверка прав
+def _is_admin(uid: int) -> bool:
+    return uid in ADMIN_USER_IDS
+
+configure_router(is_admin=_is_admin)
 
 # Текущее имя модели AITunnel (может быть изменено админом в рантайме)
 RUNTIME_AITUNNEL_MODEL: str = AITUNNEL_MODEL
@@ -3188,6 +3198,13 @@ def main() -> None:
 				payload = {}
 
 		# Команды
+		# Сначала отдаём системные команды через роутер (включая /help и /config ...)
+		handled, reply = dispatch_command(text_raw, vk, peer_id, user_id, is_dm)
+		if handled:
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+
 		if text == "/start":
 			if is_dm:
 				send_message(vk, peer_id, "Привет! Это ЛС группы. Выберите режим:", keyboard=build_dm_keyboard())
@@ -3650,16 +3667,10 @@ def main() -> None:
 			handle_ai_off(vk, peer_id)
 			continue
 		if action == "show_help":
-			help_msg = (
-				"Cry Cat — игры и ИИ:\n"
-				"— Мафия: лобби и старт\n"
-				"— Угадай число: 2 игрока, по очереди\n"
-				"— Викторина: отвечай текстом, есть подсказка/сдаюсь\n"
-				"— Кальмар: мини-игры с элиминацией\n"
-				"— ИИ‑чат: включай кнопкой. В ЛС /admin — выбор модели ИИ (gpt-5-nano / gemini-flash-1.5-8b / deepseek-chat)\n"
-				"Команды: /start, /me, /top quiz, /top guess, /top squid"
-			)
-			send_message(vk, peer_id, help_msg)
+			# Генерация справки через роутер
+			_, reply = dispatch_command("/help", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
 			continue
 
 		# Админ-панель: основные разделы
