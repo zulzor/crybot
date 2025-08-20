@@ -2070,8 +2070,8 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				# Для gpt-5-nano используем оптимизированные параметры
 				if model == "gpt-5-nano":
 					json_data["max_tokens"] = 200  # Ограничиваем для экономии
-					json_data["reasoning_tokens"] = 50  # Ограничиваем reasoning
-					json_data["reasoning_depth"] = "low"
+					# Исключаем вывод рассуждений, чтобы гарантировать непустой контент
+					json_data["reasoning"] = {"exclude": True}
 				else:
 					# Для других моделей используем стандартные параметры
 					json_data["max_tokens"] = 5000
@@ -2093,6 +2093,20 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					break
 				msg = data["choices"][0].get("message", {})
 				text = (msg.get("content") or "").strip()
+				# Попытка альтернативного извлечения текста для некоторых моделей/схем
+				if not text:
+					alt_text_candidates = [
+						(data.get("output_text") or ""),
+						(msg.get("output_text") or ""),
+						(data["choices"][0].get("text") or ""),
+						# В крайнем случае пробуем короткий вывод из поля reasoning, если провайдер так возвращает
+						(msg.get("reasoning") or {}).get("content") if isinstance(msg.get("reasoning"), dict) else "",
+					]
+					for candidate in alt_text_candidates:
+						candidate_str = str(candidate).strip()
+						if candidate_str:
+							text = candidate_str
+							break
 				if not text:
 					last_err = "empty content"
 					# при пустом ответе пробуем ещё раз (до 2 попыток)
@@ -2130,7 +2144,8 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 	# AUTO
 	if is_aitunnel_ready:
 		reply = aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
-		if not reply.startswith("ИИ временно недоступен"):
+		# Если ответ дружелюбная заглушка или сообщение о недоступности — пробуем OpenRouter
+		if reply and not reply.startswith("ИИ временно недоступен") and reply != "Хм, не расслышала. Скажи иначе, пожалуйста.":
 			return reply
 	if is_openrouter_ready:
 		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
