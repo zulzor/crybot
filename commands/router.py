@@ -263,6 +263,29 @@ def dispatch_command(
     raw = text.strip()
     lower = raw.lower()
 
+    def _map_label_to_action(s: str) -> str:
+        s = s.strip().lower()
+        mapping = {
+            "/admin": "admin_menu", "admin": "admin_menu", "админ": "admin_menu", "админ-меню": "admin_menu",
+            "хранилище": "admin_storage", "storage": "admin_storage", "⚙️ хранилище": "admin_storage",
+            "язык": "admin_lang", "language": "admin_lang", "🌐 язык": "admin_lang",
+            "мониторинг": "admin_monitoring", "monitoring": "admin_monitoring", "📈 мониторинг": "admin_monitoring",
+            "бизнес": "business", "business": "business", "🏢 космический бизнес": "business",
+            "баланс": "set_business balance", "balance": "set_business balance",
+            "ежедневный": "set_business daily", "daily": "set_business daily",
+            "магазин": "set_business shop", "shop": "set_business shop",
+            "инвентарь": "set_business inventory", "inventory": "set_business inventory",
+            "русский": "set_lang ru", "russian": "set_lang ru",
+            "english": "set_lang en", "английский": "set_lang en",
+            "sqlite": "set_storage sqlite", "json": "set_storage json", "hybrid": "set_storage hybrid",
+        }
+        return mapping.get(s, s)
+
+    mapped = _map_label_to_action(lower)
+    if mapped != lower:
+        lower = mapped
+        raw = mapped
+
     # Специальный случай: /config restore N — парсинг с аргументом
     if lower.startswith("/config restore ") or lower.startswith("config restore "):
         cmd = _commands_by_alias.get("/config restore")
@@ -338,6 +361,12 @@ def dispatch_command(
             return True, None
         except Exception:
             return True, "❌ Не удалось сохранить язык"
+
+    # Бизнес: обрабатываем mapped set_business <action>
+    if lower.startswith("set_business "):
+        action = raw.split(" ", 1)[1].strip()
+        ctx2 = RouterContext(vk=vk, peer_id=peer_id, user_id=user_id, text=action, is_dm=is_dm)
+        return True, _handle_business_action(ctx2)
 
     # Контекст/права
     if cmd.dm_only and not is_dm:
@@ -538,6 +567,16 @@ def _register_builtin_commands() -> None:
             description="Показать список команд",
             handler=_handle_help,
             admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/admin",
+            aliases=["admin", "админ"],
+            description="Админ-меню (inline)",
+            handler=lambda ctx: (_send_with_keyboard(ctx, t(ctx.user_id, "admin_menu"), _build_admin_main_inline_keyboard()) or None),
+            admin_required=True,
+            dm_only=True,
         )
     )
 
