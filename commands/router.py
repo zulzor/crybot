@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 import time
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 
 # -------- Типы --------
@@ -81,6 +82,64 @@ def require_admin(handler: Handler) -> Handler:
         return handler(ctx)
 
     return wrapper
+
+
+# -------- Вспомогательные функции отправки и клавиатур --------
+
+
+def _send_with_keyboard(ctx: RouterContext, text: str, keyboard_json: Optional[str] = None) -> None:
+    try:
+        if keyboard_json:
+            ctx.vk.messages.send(peer_id=ctx.peer_id, message=text, keyboard=keyboard_json, random_id=0)
+        else:
+            ctx.vk.messages.send(peer_id=ctx.peer_id, message=text, random_id=0)
+    except Exception:
+        # игнорируем ошибки отправки в роутере, чтобы не падать
+        pass
+
+
+def _build_inline_keyboard(button_rows: List[List[Tuple[str, Dict]]]) -> str:
+    """Строит inline-клавиатуру. button_rows: [[(label, payload_dict), ...], ...]"""
+    kb = VkKeyboard(one_time=False, inline=True)
+    first = True
+    for row in button_rows:
+        if not first:
+            kb.add_line()
+        first = False
+        for label, payload in row:
+            kb.add_button(label, color=VkKeyboardColor.PRIMARY, payload=payload)
+    return kb.get_keyboard()
+
+
+def _build_conductor_inline_keyboard() -> str:
+    rows = [
+        [("Проверить билеты", {"action": "conductor_action", "value": "проверить билеты"}),
+         ("Помочь пассажирам", {"action": "conductor_action", "value": "помочь пассажирам"})],
+        [("Решить проблемы", {"action": "conductor_action", "value": "решить проблемы"}),
+         ("Следующий поезд", {"action": "conductor_action", "value": "следующий поезд"})],
+        [("Завершить смену", {"action": "conductor_action", "value": "завершить смену"})]
+    ]
+    # На случай, если payload не обрабатывается как callback, используем текстовые подписи кнопок как команду
+    # Клиент VK всё равно отправит текст кнопки как сообщение, что подхватят команды ниже
+    return _build_inline_keyboard(rows)
+
+
+def _build_shop_inline_keyboard(economy: object) -> str:
+    # Кнопки с текстом вида "/buy <item_id>", чтобы не зависеть от payload
+    items = list(getattr(economy, "shop_items", {}).values())
+    rows: List[List[Tuple[str, Dict]]] = []
+    row: List[Tuple[str, Dict]] = []
+    for item in items:
+        label = f"/buy {item.id}"
+        row.append((label, {"action": "text", "value": label}))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    if not rows:
+        rows = [[("Обновить магазин", {"action": "text", "value": "/shop"})]]
+    return _build_inline_keyboard(rows)
 
 
 def _cleanup_hits(hits: List[float], now_ts: float, window_sec: int) -> None:
@@ -208,13 +267,17 @@ def _handle_help(ctx: RouterContext) -> Optional[str]:
 def _handle_conductor(ctx: RouterContext) -> Optional[str]:
     """Обработчик игры Проводница РЖД"""
     from games_extended import conductor_game
-    return conductor_game.start_session(ctx.peer_id, ctx.user_id)
+    text = conductor_game.start_session(ctx.peer_id, ctx.user_id)
+    _send_with_keyboard(ctx, text, _build_conductor_inline_keyboard())
+    return None
 
 def _handle_conductor_action(ctx: RouterContext) -> Optional[str]:
     """Обработчик действий в игре Проводница РЖД"""
     from games_extended import conductor_game
     action = ctx.text.strip()
-    return conductor_game.handle_action(ctx.peer_id, action)
+    text = conductor_game.handle_action(ctx.peer_id, action)
+    _send_with_keyboard(ctx, text, _build_conductor_inline_keyboard())
+    return None
 
 def _handle_hangman(ctx: RouterContext) -> Optional[str]:
     """Обработчик игры Виселица"""
@@ -230,8 +293,8 @@ def _handle_hangman_guess(ctx: RouterContext) -> Optional[str]:
 def _handle_poker_create(ctx: RouterContext) -> Optional[str]:
     """Создание покер-стола"""
     from games_extended import poker_manager
-    from bot_vk import get_user_name
-    name = get_user_name(ctx.vk, ctx.user_id)
+    # Используем имя по умолчанию, чтобы не зависеть от bot_vk
+    name = f"Игрок {ctx.user_id}"
     return poker_manager.create_game(ctx.peer_id, ctx.user_id, name)
 
 def _handle_poker_join(ctx: RouterContext) -> Optional[str]:
@@ -257,7 +320,10 @@ def _handle_balance(ctx: RouterContext) -> Optional[str]:
 def _handle_shop(ctx: RouterContext) -> Optional[str]:
     """Показать магазин"""
     from economy_social import economy_manager
-    return economy_manager.get_shop()
+    text = economy_manager.get_shop()
+    kb = _build_shop_inline_keyboard(economy_manager)
+    _send_with_keyboard(ctx, text, kb)
+    return None
 
 def _handle_buy(ctx: RouterContext) -> Optional[str]:
     """Покупка предмета"""
@@ -357,6 +423,15 @@ def _register_builtin_commands() -> None:
             aliases=["conductor", "проводница", "ржд"],
             description="Игра 'Проводница РЖД'",
             handler=_handle_conductor,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/conductor action",
+            aliases=["conductor action", "проводница действие"],
+            description="Действие в игре 'Проводница РЖД'",
+            handler=_handle_conductor_action,
             admin_required=False,
         )
     )

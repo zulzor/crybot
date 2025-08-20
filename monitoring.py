@@ -26,7 +26,8 @@ class MetricsCollector:
         self.metrics: List[Metric] = []
         self.counters: Dict[str, int] = defaultdict(int)
         self.gauges: Dict[str, float] = defaultdict(float)
-        self.histograms: Dict[str, List[float]] = defaultdict(list)
+        # Store histogram observations as tuples (value, timestamp)
+        self.histograms: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
         self.lock = threading.Lock()
         
     def increment_counter(self, name: str, labels: Optional[Dict[str, str]] = None):
@@ -54,7 +55,7 @@ class MetricsCollector:
     def observe_histogram(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
         """Добавляет значение в гистограмму"""
         with self.lock:
-            self.histograms[name].append(value)
+            self.histograms[name].append((value, time.time()))
             self.metrics.append(Metric(
                 name=f"{name}_bucket",
                 value=value,
@@ -77,10 +78,10 @@ class MetricsCollector:
     
     def get_histogram_stats(self, name: str) -> Dict[str, float]:
         """Возвращает статистику гистограммы"""
-        values = self.histograms.get(name, [])
-        if not values:
+        observations = self.histograms.get(name, [])
+        if not observations:
             return {}
-        
+        values = [v for v, ts in observations]
         return {
             "count": len(values),
             "sum": sum(values),
@@ -99,8 +100,10 @@ class MetricsCollector:
             self.metrics = [m for m in self.metrics if m.timestamp > cutoff_time]
             
             # Очищаем старые значения гистограмм
-            for name in self.histograms:
-                self.histograms[name] = [v for v in self.histograms[name] if v > cutoff_time]
+            for name in list(self.histograms.keys()):
+                self.histograms[name] = [
+                    (v, ts) for (v, ts) in self.histograms[name] if ts > cutoff_time
+                ]
 
 # Глобальный коллектор метрик
 metrics_collector = MetricsCollector()
@@ -113,6 +116,9 @@ class HealthStatus:
     message: str
     timestamp: float
     details: Optional[Dict] = None
+
+START_TIME = time.time()
+
 
 class HealthChecker:
     def __init__(self):
@@ -441,7 +447,7 @@ def status_endpoint():
         "average_response_time": metrics_collector.get_histogram_stats("ai_response_time").get("avg", 0.0),
         "cache_hit_rate": 0.0,  # TODO: Реализовать
         "active_users": 0,  # TODO: Реализовать
-        "uptime_seconds": time.time() - time.time()  # TODO: Реализовать
+        "uptime_seconds": max(0.0, time.time() - START_TIME)
     }
     
     response = {

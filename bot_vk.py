@@ -42,7 +42,7 @@ except ImportError:
 
 
 # ---------- Версия бота ----------
-BOT_VERSION = "2.1.0"  # Обновлять при каждом изменении
+BOT_VERSION = "2.0.0"  # Синхронизировано с pyproject.toml/README
 BOT_BUILD = "2025-08-20-001"  # Дата-время-порядковый номер
 
 # ---------- Система ролей и привилегий ----------
@@ -173,7 +173,7 @@ def load_config() -> Tuple[str, int, str, str, str, str]:
 	load_dotenv()
 	token = os.getenv("VK_GROUP_TOKEN", "").strip()
 	group_id_str = os.getenv("VK_GROUP_ID", "").strip()
-	openrouter_key = os.getenv("DEEPSEEK_API_KEY", "").strip()  # ключ OpenRouter
+	openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")).strip()  # ключ OpenRouter
 	aitunnel_key = os.getenv("AITUNNEL_API_KEY", "").strip()
 	ai_provider = os.getenv("AI_PROVIDER", AI_PROVIDER).strip().upper()
 	system_prompt = (
@@ -2076,7 +2076,7 @@ def get_aitunnel_model_candidates() -> List[str]:
 # ---------- DeepSeek через OpenRouter (с авто‑переключением моделей) ----------
 def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str, aitunnel_key: str = "") -> str:
 	if not api_key:
-		return "ИИ не настроен. Добавьте DEEPSEEK_API_KEY в .env."
+		return "ИИ не настроен. Добавьте OPENROUTER_API_KEY (или DEEPSEEK_API_KEY) в .env."
 	
 	# Используем runtime параметры для истории
 	max_history = min(RUNTIME_MAX_HISTORY, MAX_HISTORY_MESSAGES)
@@ -2266,7 +2266,7 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
 	if is_aitunnel_ready:
 		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
-	return "ИИ не настроен. Добавьте AITUNNEL_API_KEY/AITUNNEL_API_URL или DEEPSEEK_API_KEY в .env."
+	return "ИИ не настроен. Добавьте AITUNNEL_API_KEY/AITUNNEL_API_URL или OPENROUTER_API_KEY (DEEPSEEK_API_KEY) в .env."
 
 
 # ---------- Команды ----------

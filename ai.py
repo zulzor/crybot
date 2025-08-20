@@ -298,7 +298,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
     last_err = "unknown"
     
     # Используем runtime модель или fallback на список
-    models_to_try = ["deepseek/deepseek-chat-v3-0324:free"]  # Упрощено
+    models_to_try = [runtime_settings.openrouter_model] if runtime_settings.openrouter_model else ["deepseek/deepseek-chat-v3-0324:free"]
     
     for model in models_to_try:
         # Проверяем здоровье модели

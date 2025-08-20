@@ -15,8 +15,8 @@ install-dev: ## Установить development зависимости
 run: ## Запустить бота
 	python bot_vk.py
 
-run-dev: ## Запустить бота в режиме разработки
-	python -m uvicorn webhook:app --reload --host 0.0.0.0 --port 8080
+run-dev: ## Запустить webhook сервер (Flask)
+	python webhook.py
 
 test: ## Запустить все тесты
 	python tests.py

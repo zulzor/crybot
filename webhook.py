@@ -10,8 +10,9 @@ import hashlib
 import hmac
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from dotenv import load_dotenv
+from monitoring import generate_prometheus_metrics, health_checker
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -50,8 +51,7 @@ def verify_yoomoney_signature(data, signature):
     # Вычисляем SHA1 хеш
     expected_signature = hashlib.sha1(check_string.encode('utf-8')).hexdigest()
     
-    logger.info(f"Ожидаемая подпись: {expected_signature}")
-    logger.info(f"Полученная подпись: {signature}")
+    # Не логируем подписи и секреты в продакшене
     
     return hmac.compare_digest(expected_signature, signature)
 
@@ -101,7 +101,8 @@ def yoomoney_webhook():
     try:
         # Получаем данные
         data = request.form.to_dict()
-        signature = request.headers.get('X-YooMoney-Signature', '')
+        # Подпись приходит как sha1_hash в теле формы (для QuickPay)
+        signature = data.get('sha1_hash', '')
         
         logger.info(f"Получен вебхук от YooMoney: {data}")
         logger.info(f"Подпись: {signature}")
@@ -135,12 +136,21 @@ def yoomoney_webhook():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Проверка работоспособности"""
+    status = health_checker.get_overall_status()
+    code = 200 if status in ("healthy", "degraded") else 503
     return jsonify({
-        "status": "ok",
+        "status": status,
         "timestamp": datetime.now().isoformat(),
         "yoomoney_mode": YOOMONEY_MODE,
         "webhook_url": YOOMONEY_WEBHOOK_URL
-    })
+    }), code
+
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """Prometheus метрики"""
+    text = generate_prometheus_metrics()
+    return Response(text, mimetype='text/plain; version=0.0.4; charset=utf-8')
 
 @app.route('/', methods=['GET'])
 def index():
