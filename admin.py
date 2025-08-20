@@ -8,8 +8,25 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-import vk_api
-from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+try:
+    import vk_api  # type: ignore
+    from vk_api.keyboard import VkKeyboard, VkKeyboardColor  # type: ignore
+except Exception:  # pragma: no cover
+    # Minimal stubs to allow importing without vk_api in test envs
+    class VkKeyboard:
+        def __init__(self, one_time: bool = False, inline: bool = False):
+            self._buttons = []
+        def add_button(self, *args, **kwargs):
+            self._buttons.append((args, kwargs))
+        def add_line(self):
+            self._buttons.append("\n")
+        def get_keyboard(self) -> str:
+            return "{}"
+    class VkKeyboardColor:
+        PRIMARY = "primary"
+        SECONDARY = "secondary"
+        POSITIVE = "positive"
+        NEGATIVE = "negative"
 
 from ai import runtime_settings, export_ai_settings, import_ai_settings, reset_ai_settings
 from config import (
