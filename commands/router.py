@@ -204,6 +204,107 @@ def _handle_help(ctx: RouterContext) -> Optional[str]:
     return "\n".join(lines)
 
 
+# -------- Новые команды для игр --------
+def _handle_conductor(ctx: RouterContext) -> Optional[str]:
+    """Обработчик игры Проводница РЖД"""
+    from games_extended import conductor_game
+    return conductor_game.start_session(ctx.peer_id, ctx.user_id)
+
+def _handle_conductor_action(ctx: RouterContext) -> Optional[str]:
+    """Обработчик действий в игре Проводница РЖД"""
+    from games_extended import conductor_game
+    action = ctx.text.strip()
+    return conductor_game.handle_action(ctx.peer_id, action)
+
+def _handle_hangman(ctx: RouterContext) -> Optional[str]:
+    """Обработчик игры Виселица"""
+    from games_extended import hangman_manager
+    return hangman_manager.start_game(ctx.peer_id)
+
+def _handle_hangman_guess(ctx: RouterContext) -> Optional[str]:
+    """Обработчик угадывания букв в Виселице"""
+    from games_extended import hangman_manager
+    letter = ctx.text.strip()
+    return hangman_manager.guess_letter(ctx.peer_id, letter)
+
+def _handle_poker_create(ctx: RouterContext) -> Optional[str]:
+    """Создание покер-стола"""
+    from games_extended import poker_manager
+    from bot_vk import get_user_name
+    name = get_user_name(ctx.vk, ctx.user_id)
+    return poker_manager.create_game(ctx.peer_id, ctx.user_id, name)
+
+def _handle_poker_join(ctx: RouterContext) -> Optional[str]:
+    """Присоединение к покер-столу"""
+    from games_extended import poker_manager
+    from bot_vk import get_user_name
+    name = get_user_name(ctx.vk, ctx.user_id)
+    return poker_manager.join_game(ctx.peer_id, ctx.user_id, name)
+
+# -------- Команды экономики --------
+def _handle_daily(ctx: RouterContext) -> Optional[str]:
+    """Ежедневный бонус"""
+    from economy_social import economy_manager
+    return economy_manager.daily_bonus(ctx.user_id)
+
+def _handle_balance(ctx: RouterContext) -> Optional[str]:
+    """Показать баланс"""
+    from economy_social import economy_manager, Currency
+    wallet = economy_manager.get_wallet(ctx.user_id)
+    balance = wallet.balance.get(Currency.CRYCOIN, 0)
+    return f"💰 Баланс: {balance} 🪙"
+
+def _handle_shop(ctx: RouterContext) -> Optional[str]:
+    """Показать магазин"""
+    from economy_social import economy_manager
+    return economy_manager.get_shop()
+
+def _handle_buy(ctx: RouterContext) -> Optional[str]:
+    """Покупка предмета"""
+    from economy_social import economy_manager
+    item_id = ctx.text.strip()
+    return economy_manager.buy_item(ctx.user_id, item_id)
+
+# -------- Социальные команды --------
+def _handle_profile(ctx: RouterContext) -> Optional[str]:
+    """Показать профиль"""
+    from economy_social import social_manager
+    profile = social_manager.get_profile(ctx.user_id)
+    return (
+        f"👤 Профиль {profile.name}\n"
+        f"📊 Уровень: {profile.level}\n"
+        f"💕 Статус: {profile.relationship_status.value}\n"
+        f"👥 Друзей: {len(profile.friends)}\n"
+        f"🏰 Клан: {'Да' if profile.clan_id else 'Нет'}"
+    )
+
+def _handle_clan_create(ctx: RouterContext) -> Optional[str]:
+    """Создание клана"""
+    from economy_social import social_manager
+    parts = ctx.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return "❌ Использование: /clan create <название> <описание>"
+    
+    name = parts[0]
+    description = parts[1] if len(parts) > 1 else "Новый клан"
+    return social_manager.create_clan(ctx.user_id, name, description)
+
+def _handle_clan_join(ctx: RouterContext) -> Optional[str]:
+    """Присоединение к клану"""
+    from economy_social import social_manager
+    clan_id = ctx.text.strip()
+    if not clan_id.isdigit():
+        return "❌ ID клана должен быть числом"
+    return social_manager.join_clan(ctx.user_id, int(clan_id))
+
+def _handle_marry(ctx: RouterContext) -> Optional[str]:
+    """Предложение брака"""
+    from economy_social import social_manager
+    partner_id = ctx.text.strip()
+    if not partner_id.isdigit():
+        return "❌ ID партнёра должен быть числом"
+    return social_manager.propose_marriage(ctx.user_id, int(partner_id))
+
 @require_admin
 def _handle_config_backup(ctx: RouterContext) -> Optional[str]:
     if not ctx.is_dm:
@@ -245,6 +346,120 @@ def _register_builtin_commands() -> None:
             aliases=["help", "помощь", "halp", "команды"],
             description="Показать список команд",
             handler=_handle_help,
+            admin_required=False,
+        )
+    )
+
+    # Новые игры
+    register_command(
+        Command(
+            name="/conductor",
+            aliases=["conductor", "проводница", "ржд"],
+            description="Игра 'Проводница РЖД'",
+            handler=_handle_conductor,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/hangman",
+            aliases=["hangman", "виселица"],
+            description="Игра 'Виселица'",
+            handler=_handle_hangman,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker create",
+            aliases=["poker create", "покер создать"],
+            description="Создать покер-стол",
+            handler=_handle_poker_create,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker join",
+            aliases=["poker join", "покер присоединиться"],
+            description="Присоединиться к покер-столу",
+            handler=_handle_poker_join,
+            admin_required=False,
+        )
+    )
+
+    # Экономика
+    register_command(
+        Command(
+            name="/daily",
+            aliases=["daily", "бонус", "ежедневный"],
+            description="Получить ежедневный бонус",
+            handler=_handle_daily,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/balance",
+            aliases=["balance", "баланс", "деньги"],
+            description="Показать баланс",
+            handler=_handle_balance,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/shop",
+            aliases=["shop", "магазин"],
+            description="Показать магазин",
+            handler=_handle_shop,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/buy",
+            aliases=["buy", "купить"],
+            description="Купить предмет: /buy <id>",
+            handler=_handle_buy,
+            admin_required=False,
+        )
+    )
+
+    # Социальное
+    register_command(
+        Command(
+            name="/profile",
+            aliases=["profile", "профиль"],
+            description="Показать профиль",
+            handler=_handle_profile,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/clan create",
+            aliases=["clan create", "клан создать"],
+            description="Создать клан: /clan create <название> <описание>",
+            handler=_handle_clan_create,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/clan join",
+            aliases=["clan join", "клан присоединиться"],
+            description="Присоединиться к клану: /clan join <id>",
+            handler=_handle_clan_join,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/marry",
+            aliases=["marry", "жениться"],
+            description="Предложить брак: /marry <user_id>",
+            handler=_handle_marry,
             admin_required=False,
         )
     )

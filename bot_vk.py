@@ -27,6 +27,11 @@ from commands.router import (
     dispatch_command,
 )
 
+# Новые модули
+from games_extended import conductor_game, poker_manager, hangman_manager
+from economy_social import economy_manager, social_manager
+from cache_monitoring import cache_manager, monitoring_manager, logger
+
 # Flask для webhook сервера
 try:
 	from flask import Flask, request, jsonify
@@ -1666,6 +1671,12 @@ def build_main_keyboard() -> str:
 	keyboard.add_line()
 	keyboard.add_button("🏢 Космический Бизнес", color=VkKeyboardColor.POSITIVE, payload={"action": "start_business"})
 	keyboard.add_line()
+	keyboard.add_button("🚂 Проводница РЖД", color=VkKeyboardColor.PRIMARY, payload={"action": "start_conductor"})
+	keyboard.add_button("🎯 Виселица", color=VkKeyboardColor.SECONDARY, payload={"action": "start_hangman"})
+	keyboard.add_line()
+	keyboard.add_button("🃏 Покер", color=VkKeyboardColor.POSITIVE, payload={"action": "start_poker"})
+	keyboard.add_button("💰 Экономика", color=VkKeyboardColor.PRIMARY, payload={"action": "show_economy"})
+	keyboard.add_line()
 	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
 	keyboard.add_line()
@@ -3079,6 +3090,25 @@ def main() -> None:
 	global RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES, RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
 	global RUNTIME_OR_TO_AT_FALLBACK, RUNTIME_OPENROUTER_MODEL, RUNTIME_AITUNNEL_MODEL
 	
+	# Инициализация мониторинга и кеширования
+	from cache_monitoring import monitoring_manager, cache_manager, logger as cache_logger
+	cache_logger.info("Инициализация CryBot с мониторингом и кешированием")
+	
+	# Запуск фоновых задач
+	def background_tasks():
+		"""Фоновые задачи для очистки кеша и сбора метрик"""
+		while True:
+			try:
+				time.sleep(300)  # Каждые 5 минут
+				cache_manager.cleanup_expired()
+				cache_logger.debug("Фоновые задачи выполнены")
+			except Exception as e:
+				cache_logger.error(f"Ошибка в фоновых задачах: {e}")
+	
+	# Запускаем фоновые задачи в отдельном потоке
+	background_thread = threading.Thread(target=background_tasks, daemon=True)
+	background_thread.start()
+	
 	configure_logging()
 	load_dotenv()
 	load_profiles()
@@ -3673,6 +3703,66 @@ def main() -> None:
 				send_message(vk, peer_id, reply)
 			continue
 
+		# Новые игры
+		if action == "start_conductor":
+			_, reply = dispatch_command("/conductor", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "start_hangman":
+			_, reply = dispatch_command("/hangman", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "start_poker":
+			# Показываем меню покера
+			keyboard = VkKeyboard(one_time=False, inline=False)
+			keyboard.add_button("🃏 Создать стол", color=VkKeyboardColor.PRIMARY, payload={"action": "poker_create"})
+			keyboard.add_button("👥 Присоединиться", color=VkKeyboardColor.SECONDARY, payload={"action": "poker_join"})
+			keyboard.add_line()
+			keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "back_to_main"})
+			send_message(vk, peer_id, "🃏 Покер-стол:", keyboard=keyboard.get_keyboard())
+			continue
+		if action == "poker_create":
+			_, reply = dispatch_command("/poker create", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "poker_join":
+			_, reply = dispatch_command("/poker join", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "show_economy":
+			# Показываем меню экономики
+			keyboard = VkKeyboard(one_time=False, inline=False)
+			keyboard.add_button("💰 Баланс", color=VkKeyboardColor.PRIMARY, payload={"action": "show_balance"})
+			keyboard.add_button("🛒 Магазин", color=VkKeyboardColor.SECONDARY, payload={"action": "show_shop"})
+			keyboard.add_line()
+			keyboard.add_button("🎁 Ежедневный бонус", color=VkKeyboardColor.POSITIVE, payload={"action": "claim_daily"})
+			keyboard.add_line()
+			keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "back_to_main"})
+			send_message(vk, peer_id, "💰 Экономика:", keyboard=keyboard.get_keyboard())
+			continue
+		if action == "show_balance":
+			_, reply = dispatch_command("/balance", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "show_shop":
+			_, reply = dispatch_command("/shop", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "claim_daily":
+			_, reply = dispatch_command("/daily", vk, peer_id, user_id, is_dm)
+			if reply:
+				send_message(vk, peer_id, reply)
+			continue
+		if action == "back_to_main":
+			send_message(vk, peer_id, "Главное меню:", keyboard=build_main_keyboard())
+			continue
+
 		# Админ-панель: основные разделы
 		if action == "admin":
 			handle_admin_panel(vk, peer_id, user_id)
@@ -4018,6 +4108,16 @@ def main() -> None:
 		
 		# Отслеживание активности для всех действий
 		track_user_activity(user_id, action or "message", text[:50])
+		
+		# Метрики мониторинга
+		try:
+			from cache_monitoring import monitoring_manager
+			monitoring_manager.increment_counter("bot_messages_total")
+			if action:
+				monitoring_manager.increment_counter("bot_commands_total")
+			monitoring_manager.set_gauge("bot_active_users", len(set([user_id])))  # Упрощённо
+		except Exception as e:
+			pass  # Игнорируем ошибки мониторинга
 		
 		# Проверка на бан
 		is_banned, ban_info = is_user_banned(user_id)
