@@ -3042,11 +3042,6 @@ def add_history(peer_id: int, role: str, content: str) -> None:
 # ---------- Основной цикл ----------
 def main() -> None:
 	# Объявляем все глобальные переменные в начале функции
-	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
-	global RUNTIME_MAX_AI_CHARS, RUNTIME_MAX_HISTORY, RUNTIME_REASONING_ENABLED
-	global RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH, RUNTIME_AI_PROVIDER
-	global RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES, RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
-	global RUNTIME_OR_TO_AT_FALLBACK, RUNTIME_OPENROUTER_MODEL
 	
 	configure_logging()
 	load_dotenv()
@@ -3346,7 +3341,6 @@ def main() -> None:
 		if is_dm and text.startswith("/ai_provider ") and user_id in ADMIN_USER_IDS:
 			provider = text.split(" ", 1)[1].strip().upper()
 			if provider in {"OPENROUTER", "AITUNNEL", "AUTO"}:
-				global RUNTIME_AI_PROVIDER
 				RUNTIME_AI_PROVIDER = provider
 				send_message(vk, peer_id, f"✅ Провайдер ИИ изменен на: {provider}")
 			else:
@@ -3501,11 +3495,9 @@ def main() -> None:
 					retries = int(parts[2].strip())
 					if 1 <= retries <= 5:
 						if provider == "OR":
-							global RUNTIME_OR_RETRIES
 							RUNTIME_OR_RETRIES = retries
 							send_message(vk, peer_id, f"✅ Ретраи OpenRouter изменены на: {retries}")
 						elif provider == "AT":
-							global RUNTIME_AT_RETRIES
 							RUNTIME_AT_RETRIES = retries
 							send_message(vk, peer_id, f"✅ Ретраи AITunnel изменены на: {retries}")
 						else:
@@ -3520,7 +3512,6 @@ def main() -> None:
 		if is_dm and text.startswith("/ai_provider ") and user_id in ADMIN_USER_IDS:
 			provider = text.split(" ", 1)[1].strip().upper()
 			if provider in {"OPENROUTER", "AITUNNEL", "AUTO"}:
-				global RUNTIME_AI_PROVIDER
 				RUNTIME_AI_PROVIDER = provider
 				send_message(vk, peer_id, f"✅ Провайдер ИИ изменен на: {provider}")
 			else:
@@ -3681,49 +3672,41 @@ def main() -> None:
 		# AI настройки
 		if action == "ai_temp_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_TEMPERATURE
 				RUNTIME_TEMPERATURE = max(0.0, RUNTIME_TEMPERATURE - 0.1)
 				send_message(vk, peer_id, f"OK. Температура: {RUNTIME_TEMPERATURE:.1f}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_temp_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_TEMPERATURE
 				RUNTIME_TEMPERATURE = min(2.0, RUNTIME_TEMPERATURE + 0.1)
 				send_message(vk, peer_id, f"OK. Температура: {RUNTIME_TEMPERATURE:.1f}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_top_p_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_TOP_P
 				RUNTIME_TOP_P = max(0.0, RUNTIME_TOP_P - 0.1)
 				send_message(vk, peer_id, f"OK. Top-P: {RUNTIME_TOP_P:.1f}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_top_p_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_TOP_P
 				RUNTIME_TOP_P = min(1.0, RUNTIME_TOP_P + 0.1)
 				send_message(vk, peer_id, f"OK. Top-P: {RUNTIME_TOP_P:.1f}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_max_or_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_TOKENS_OR
 				RUNTIME_MAX_TOKENS_OR = max(10, RUNTIME_MAX_TOKENS_OR - 10)
 				send_message(vk, peer_id, f"OK. Макс. токены OpenRouter: {RUNTIME_MAX_TOKENS_OR}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_max_or_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_TOKENS_OR
 				RUNTIME_MAX_TOKENS_OR = min(1000, RUNTIME_MAX_TOKENS_OR + 10)
 				send_message(vk, peer_id, f"OK. Макс. токены OpenRouter: {RUNTIME_MAX_TOKENS_OR}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_max_at_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_TOKENS_AT
 				RUNTIME_MAX_TOKENS_AT = max(100, RUNTIME_MAX_TOKENS_AT - 100)
 				send_message(vk, peer_id, f"OK. Макс. токены AITunnel: {RUNTIME_MAX_TOKENS_AT}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_max_at_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_TOKENS_AT
 				RUNTIME_MAX_TOKENS_AT = min(10000, RUNTIME_MAX_TOKENS_AT + 100)
 				send_message(vk, peer_id, f"OK. Макс. токены AITunnel: {RUNTIME_MAX_TOKENS_AT}", keyboard=build_ai_settings_keyboard())
 			continue
@@ -3733,19 +3716,16 @@ def main() -> None:
 			continue
 		if action == "ai_reason_tokens_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_REASONING_TOKENS
 				RUNTIME_REASONING_TOKENS = max(10, RUNTIME_REASONING_TOKENS - 10)
 				send_message(vk, peer_id, f"OK. Reasoning токены: {RUNTIME_REASONING_TOKENS}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_reason_tokens_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_REASONING_TOKENS
 				RUNTIME_REASONING_TOKENS = min(500, RUNTIME_REASONING_TOKENS + 10)
 				send_message(vk, peer_id, f"OK. Reasoning токены: {RUNTIME_REASONING_TOKENS}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_reason_depth_cycle":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_REASONING_DEPTH
 				depths = ["low", "medium", "high"]
 				current_idx = depths.index(RUNTIME_REASONING_DEPTH) if RUNTIME_REASONING_DEPTH in depths else 0
 				RUNTIME_REASONING_DEPTH = depths[(current_idx + 1) % len(depths)]
@@ -3753,73 +3733,61 @@ def main() -> None:
 			continue
 		if action == "ai_hist_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_HISTORY
 				RUNTIME_MAX_HISTORY = max(1, RUNTIME_MAX_HISTORY - 1)
 				send_message(vk, peer_id, f"OK. Макс. история: {RUNTIME_MAX_HISTORY}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_hist_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_HISTORY
 				RUNTIME_MAX_HISTORY = min(20, RUNTIME_MAX_HISTORY + 1)
 				send_message(vk, peer_id, f"OK. Макс. история: {RUNTIME_MAX_HISTORY}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_chars_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_AI_CHARS
 				RUNTIME_MAX_AI_CHARS = max(50, RUNTIME_MAX_AI_CHARS - 10)
 				send_message(vk, peer_id, f"OK. Макс. символы: {RUNTIME_MAX_AI_CHARS}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_chars_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_MAX_AI_CHARS
 				RUNTIME_MAX_AI_CHARS = min(1000, RUNTIME_MAX_AI_CHARS + 10)
 				send_message(vk, peer_id, f"OK. Макс. символы: {RUNTIME_MAX_AI_CHARS}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_or_retries_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_OR_RETRIES
 				RUNTIME_OR_RETRIES = max(1, RUNTIME_OR_RETRIES - 1)
 				send_message(vk, peer_id, f"OK. Ретраи OpenRouter: {RUNTIME_OR_RETRIES}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_or_retries_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_OR_RETRIES
 				RUNTIME_OR_RETRIES = min(5, RUNTIME_OR_RETRIES + 1)
 				send_message(vk, peer_id, f"OK. Ретраи OpenRouter: {RUNTIME_OR_RETRIES}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_at_retries_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_AT_RETRIES
 				RUNTIME_AT_RETRIES = max(1, RUNTIME_AT_RETRIES - 1)
 				send_message(vk, peer_id, f"OK. Ретраи AITunnel: {RUNTIME_AT_RETRIES}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_at_retries_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_AT_RETRIES
 				RUNTIME_AT_RETRIES = min(5, RUNTIME_AT_RETRIES + 1)
 				send_message(vk, peer_id, f"OK. Ретраи AITunnel: {RUNTIME_AT_RETRIES}", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_or_timeout_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_OR_TIMEOUT
 				RUNTIME_OR_TIMEOUT = max(10, RUNTIME_OR_TIMEOUT - 10)
 				send_message(vk, peer_id, f"OK. Таймаут OpenRouter: {RUNTIME_OR_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_or_timeout_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_OR_TIMEOUT
 				RUNTIME_OR_TIMEOUT = min(300, RUNTIME_OR_TIMEOUT + 10)
 				send_message(vk, peer_id, f"OK. Таймаут OpenRouter: {RUNTIME_OR_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_at_timeout_down":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_AT_TIMEOUT
 				RUNTIME_AT_TIMEOUT = max(10, RUNTIME_AT_TIMEOUT - 10)
 				send_message(vk, peer_id, f"OK. Таймаут AITunnel: {RUNTIME_AT_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
 			continue
 		if action == "ai_at_timeout_up":
 			if user_id in ADMIN_USER_IDS:
-				global RUNTIME_AT_TIMEOUT
 				RUNTIME_AT_TIMEOUT = min(300, RUNTIME_AT_TIMEOUT + 10)
 				send_message(vk, peer_id, f"OK. Таймаут AITunnel: {RUNTIME_AT_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
 			continue
