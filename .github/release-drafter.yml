@@ -1,0 +1,39 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+categories:
+  - title: '🚀 Features'
+    labels:
+      - 'feature'
+      - 'enhancement'
+  - title: '🐛 Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+  - title: '🧰 Maintenance'
+    labels:
+      - 'chore'
+      - 'dependencies'
+template: |
+  ## 🎉 What's Changed
+
+  $CHANGES
+
+  ## 📋 Full Changelog
+
+  $CHANGES
+
+  ## 🚀 Installation
+
+  ```bash
+  pip install -r requirements.txt
+  python bot_vk.py
+  ```
+
+  ## 🔧 Configuration
+
+  Copy `.env.example` to `.env` and configure your settings.
+
+  ## 📚 Documentation
+
+  See [README.md](README.md) for full documentation.

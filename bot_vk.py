@@ -1763,6 +1763,13 @@ def build_ai_settings_keyboard() -> str:
 	keyboard.add_button("Fallback on/off", color=VkKeyboardColor.SECONDARY, payload={"action": "ai_fallback_toggle"})
 	keyboard.add_button("Провайдер", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_ai_provider"})
 	keyboard.add_button("Показать", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_current"})
+	keyboard.add_line()
+	# Ряд 8: экспорт/импорт
+	keyboard.add_button("📤 Экспорт", color=VkKeyboardColor.POSITIVE, payload={"action": "ai_export_settings"})
+	keyboard.add_button("📥 Импорт", color=VkKeyboardColor.POSITIVE, payload={"action": "ai_import_settings"})
+	keyboard.add_line()
+	# Ряд 9: сброс и назад
+	keyboard.add_button("🔄 Сброс", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_reset_settings"})
 	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_back"})
 	return keyboard.get_keyboard()
 
@@ -2010,7 +2017,7 @@ def format_players_list(vk, ids_list: List[int]) -> str:
 	return format_players(vk, set(ids_list))
 
 
-def clamp_text(text: str, max_chars: int = MAX_AI_CHARS) -> str:
+def clamp_text(text: str, max_chars: int = RUNTIME_MAX_AI_CHARS) -> str:
 	t = (text or "").strip()
 	if len(t) <= max_chars:
 		return t
@@ -2042,8 +2049,11 @@ def get_aitunnel_model_candidates() -> List[str]:
 def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str]], user_text: str, aitunnel_key: str = "") -> str:
 	if not api_key:
 		return "ИИ не настроен. Добавьте DEEPSEEK_API_KEY в .env."
+	
+	# Используем runtime параметры для истории
+	max_history = min(RUNTIME_MAX_HISTORY, MAX_HISTORY_MESSAGES)
 	messages = [{"role": "system", "content": system_prompt}]
-	messages.extend(history[-MAX_HISTORY_MESSAGES:])
+	messages.extend(history[-max_history:])
 	messages.append({"role": "user", "content": user_text})
 
 	logger = logging.getLogger("vk-mafia-bot")
@@ -2053,7 +2063,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	models_to_try = [RUNTIME_OPENROUTER_MODEL] if RUNTIME_OPENROUTER_MODEL else get_model_candidates()
 	
 	for model in models_to_try:
-		for attempt in range(2):  # до 2 попыток на модель
+		for attempt in range(RUNTIME_OR_RETRIES):  # Используем runtime retries
 			try:
 				resp = requests.post(
 					DEEPSEEK_API_URL,
@@ -2066,10 +2076,11 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					json={
 						"model": model,
 						"messages": messages,
-						"temperature": 0.6,
-						"max_tokens": 80,
+						"temperature": RUNTIME_TEMPERATURE,
+						"top_p": RUNTIME_TOP_P,
+						"max_tokens": RUNTIME_MAX_TOKENS_OR,
 					},
-					timeout=60,  # Увеличиваем timeout для стабильности
+					timeout=RUNTIME_OR_TIMEOUT,  # Используем runtime timeout
 				)
 				resp.raise_for_status()
 				data = resp.json()
@@ -2082,7 +2093,7 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					last_err = "empty content"
 					break
 				usage = data.get("usage") or {}
-				logger.info(f"AI OK model={model} attempt={attempt+1} usage={usage}")
+				logger.info(f"AI OK (OpenRouter) model={model} attempt={attempt+1} usage={usage} temp={RUNTIME_TEMPERATURE} top_p={RUNTIME_TOP_P} max_tokens={RUNTIME_MAX_TOKENS_OR}")
 				return text
 			except requests.HTTPError as e:
 				code = e.response.status_code if e.response else None
@@ -2097,8 +2108,8 @@ def deepseek_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 				break
 		logger.info(f"AI fallback: {last_err} on model={model}")
 	
-	# Если все модели OpenRouter недоступны, пробуем AITunnel как fallback
-	if aitunnel_key and AITUNNEL_API_URL:
+	# Если все модели OpenRouter недоступны, пробуем AITunnel как fallback (если разрешено)
+	if RUNTIME_OR_TO_AT_FALLBACK and aitunnel_key and AITUNNEL_API_URL:
 		logger.info("Trying AITunnel as fallback...")
 		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
 	
@@ -2111,14 +2122,16 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 	if not AITUNNEL_API_URL:
 		return "ИИ не настроен. Добавьте AITUNNEL_API_URL в .env."
 
+	# Используем runtime параметры для истории
+	max_history = min(RUNTIME_MAX_HISTORY, MAX_HISTORY_MESSAGES)
 	messages = [{"role": "system", "content": system_prompt}]
-	messages.extend(history[-MAX_HISTORY_MESSAGES:])
+	messages.extend(history[-max_history:])
 	messages.append({"role": "user", "content": user_text})
 
 	logger = logging.getLogger("vk-mafia-bot")
 	last_err = "unknown"
 	
-		# Умный выбор модели: сначала runtime, потом по стоимости
+	# Умный выбор модели: сначала runtime, потом по стоимости
 	models_to_try = []
 	if RUNTIME_AITUNNEL_MODEL:
 		models_to_try.append(RUNTIME_AITUNNEL_MODEL)
@@ -2130,24 +2143,28 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 			models_to_try.append(model)
 	
 	for model in models_to_try:
-		for attempt in range(2):
+		for attempt in range(RUNTIME_AT_RETRIES):
 			try:
-				# Формируем JSON данные в зависимости от модели
+				# Формируем JSON данные с runtime параметрами
 				json_data = {
 					"model": model,
 					"messages": messages,
-					"temperature": 2.0,  # Как на сайте AITunnel
-					"max_tokens": 5000,  # Как на сайте AITunnel
+					"temperature": RUNTIME_TEMPERATURE,
+					"top_p": RUNTIME_TOP_P,
+					"max_tokens": RUNTIME_MAX_TOKENS_AT,
 				}
 				
-				# Для gpt-5-nano используем оптимизированные параметры
-				if model == "gpt-5-nano":
-					json_data["max_tokens"] = 200  # Ограничиваем для экономии
-					# Исключаем вывод рассуждений, чтобы гарантировать непустой контент
-					json_data["reasoning"] = {"exclude": True}
+				# Настройка reasoning на основе runtime параметров
+				if RUNTIME_REASONING_ENABLED:
+					json_data["reasoning"] = {
+						"enabled": True,
+						"max_tokens": RUNTIME_REASONING_TOKENS,
+						"depth": RUNTIME_REASONING_DEPTH
+					}
 				else:
-					# Для других моделей используем стандартные параметры
-					json_data["max_tokens"] = 5000
+					# Для gpt-5-nano и других моделей исключаем reasoning
+					if model == "gpt-5-nano":
+						json_data["max_tokens"] = min(200, RUNTIME_MAX_TOKENS_AT)  # Ограничиваем для экономии
 					json_data["reasoning"] = {"exclude": True}
 				
 				resp = requests.post(
@@ -2157,7 +2174,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 						"Content-Type": "application/json",
 					},
 					json=json_data,
-					timeout=60,  # Увеличиваем timeout для стабильности
+					timeout=RUNTIME_AT_TIMEOUT,  # Используем runtime timeout
 				)
 				resp.raise_for_status()
 				data = resp.json()
@@ -2185,7 +2202,7 @@ def aitunnel_reply(api_key: str, system_prompt: str, history: List[Dict[str, str
 					# при пустом ответе пробуем ещё раз (до 2 попыток)
 					continue
 				usage = data.get("usage") or {}
-				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1} usage={usage}")
+				logger.info(f"AI OK (AITunnel) model={model} attempt={attempt+1} usage={usage} temp={RUNTIME_TEMPERATURE} top_p={RUNTIME_TOP_P} max_tokens={RUNTIME_MAX_TOKENS_AT}")
 				return text
 			except requests.HTTPError as e:
 				code = e.response.status_code if e.response else None
@@ -2436,7 +2453,7 @@ def handle_ai_message(vk, peer_id: int, user_text: str,
 	add_history(peer_id, "user", user_text)
 	reply = generate_ai_reply(user_text, system_prompt, AI_HISTORY.get(peer_id, []),
 							  openrouter_key, aitunnel_key, provider)
-	reply = clamp_text(reply, MAX_AI_CHARS)
+	reply = clamp_text(reply, RUNTIME_MAX_AI_CHARS)
 	add_history(peer_id, "assistant", reply)
 	send_message(vk, peer_id, reply)
 
@@ -2482,6 +2499,273 @@ def handle_admin_current(vk, peer_id: int, user_id: int) -> None:
 		# Показываем текущую модель AITunnel
 		current = RUNTIME_AITUNNEL_MODEL or AITUNNEL_MODEL
 		send_message(vk, peer_id, f"Текущий провайдер: AITunnel\nМодель: {current}", keyboard=build_admin_keyboard())
+
+
+def handle_admin_ai_settings(vk, peer_id: int, user_id: int) -> None:
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	text = (
+		f"⚙️ AI настройки:\n\n"
+		f"Провайдер: {RUNTIME_AI_PROVIDER}\n"
+		f"Температура: {RUNTIME_TEMPERATURE}\n"
+		f"Top-P: {RUNTIME_TOP_P}\n"
+		f"Макс. токены OR: {RUNTIME_MAX_TOKENS_OR}\n"
+		f"Макс. токены AT: {RUNTIME_MAX_TOKENS_AT}\n"
+		f"Макс. символы: {RUNTIME_MAX_AI_CHARS}\n"
+		f"История: {RUNTIME_MAX_HISTORY}\n"
+		f"Ретраи OR: {RUNTIME_OR_RETRIES}\n"
+		f"Ретраи AT: {RUNTIME_AT_RETRIES}\n"
+		f"Таймаут OR: {RUNTIME_OR_TIMEOUT}s\n"
+		f"Таймаут AT: {RUNTIME_AT_TIMEOUT}s\n"
+		f"Reasoning: {'Вкл' if RUNTIME_REASONING_ENABLED else 'Выкл'}\n"
+		f"Fallback OR→AT: {'Вкл' if RUNTIME_OR_TO_AT_FALLBACK else 'Выкл'}"
+	)
+	send_message(vk, peer_id, text, keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_temperature(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_TEMPERATURE
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		temp = float(value)
+		if 0.0 <= temp <= 2.0:
+			RUNTIME_TEMPERATURE = temp
+			send_message(vk, peer_id, f"OK. Температура: {temp}", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "Температура должна быть от 0.0 до 2.0", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите число от 0.0 до 2.0", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_top_p(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_TOP_P
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		top_p = float(value)
+		if 0.0 <= top_p <= 1.0:
+			RUNTIME_TOP_P = top_p
+			send_message(vk, peer_id, f"OK. Top-P: {top_p}", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "Top-P должен быть от 0.0 до 1.0", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите число от 0.0 до 1.0", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_max_tokens(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
+	global RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		tokens = int(value)
+		if tokens > 0:
+			if provider.upper() == "OR":
+				RUNTIME_MAX_TOKENS_OR = tokens
+				send_message(vk, peer_id, f"OK. Макс. токены OpenRouter: {tokens}", keyboard=build_ai_settings_keyboard())
+			elif provider.upper() == "AT":
+				RUNTIME_MAX_TOKENS_AT = tokens
+				send_message(vk, peer_id, f"OK. Макс. токены AITunnel: {tokens}", keyboard=build_ai_settings_keyboard())
+			else:
+				send_message(vk, peer_id, "Укажите провайдера: OR или AT", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "Количество токенов должно быть больше 0", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите целое число больше 0", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_max_chars(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_MAX_AI_CHARS
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		chars = int(value)
+		if 50 <= chars <= 1000:
+			RUNTIME_MAX_AI_CHARS = chars
+			send_message(vk, peer_id, f"OK. Макс. символы: {chars}", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "Количество символов должно быть от 50 до 1000", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите целое число от 50 до 1000", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_history(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_MAX_HISTORY
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		history = int(value)
+		if 1 <= history <= 20:
+			RUNTIME_MAX_HISTORY = history
+			send_message(vk, peer_id, f"OK. Макс. история: {history}", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "История должна быть от 1 до 20", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите целое число от 1 до 20", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_set_timeout(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
+	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		timeout = int(value)
+		if 10 <= timeout <= 300:
+			if provider.upper() == "OR":
+				RUNTIME_OR_TIMEOUT = timeout
+				send_message(vk, peer_id, f"OK. Таймаут OpenRouter: {timeout}s", keyboard=build_ai_settings_keyboard())
+			elif provider.upper() == "AT":
+				RUNTIME_AT_TIMEOUT = timeout
+				send_message(vk, peer_id, f"OK. Таймаут AITunnel: {timeout}s", keyboard=build_ai_settings_keyboard())
+			else:
+				send_message(vk, peer_id, "Укажите провайдера: OR или AT", keyboard=build_ai_settings_keyboard())
+		else:
+			send_message(vk, peer_id, "Таймаут должен быть от 10 до 300 секунд", keyboard=build_ai_settings_keyboard())
+	except ValueError:
+		send_message(vk, peer_id, "Укажите целое число от 10 до 300", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_toggle_reasoning(vk, peer_id: int, user_id: int) -> None:
+	global RUNTIME_REASONING_ENABLED
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	RUNTIME_REASONING_ENABLED = not RUNTIME_REASONING_ENABLED
+	status = "включен" if RUNTIME_REASONING_ENABLED else "выключен"
+	send_message(vk, peer_id, f"OK. Reasoning {status}", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_toggle_fallback(vk, peer_id: int, user_id: int) -> None:
+	global RUNTIME_OR_TO_AT_FALLBACK
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	RUNTIME_OR_TO_AT_FALLBACK = not RUNTIME_OR_TO_AT_FALLBACK
+	status = "включен" if RUNTIME_OR_TO_AT_FALLBACK else "выключен"
+	send_message(vk, peer_id, f"OK. Fallback OpenRouter→AITunnel {status}", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_reset_ai_settings(vk, peer_id: int, user_id: int) -> None:
+	"""Сброс всех AI настроек к значениям по умолчанию"""
+	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+	global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
+	global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
+	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
+	
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	# Сброс к значениям по умолчанию
+	RUNTIME_TEMPERATURE = 0.6
+	RUNTIME_TOP_P = 1.0
+	RUNTIME_MAX_TOKENS_OR = 80
+	RUNTIME_MAX_TOKENS_AT = 5000
+	RUNTIME_REASONING_ENABLED = False
+	RUNTIME_REASONING_TOKENS = 50
+	RUNTIME_REASONING_DEPTH = "low"
+	RUNTIME_MAX_HISTORY = MAX_HISTORY_MESSAGES
+	RUNTIME_MAX_AI_CHARS = MAX_AI_CHARS
+	RUNTIME_OR_RETRIES = 2
+	RUNTIME_AT_RETRIES = 2
+	RUNTIME_OR_TIMEOUT = 60
+	RUNTIME_AT_TIMEOUT = 60
+	RUNTIME_OR_TO_AT_FALLBACK = True
+	
+	send_message(vk, peer_id, "✅ AI настройки сброшены к значениям по умолчанию", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_export_ai_settings(vk, peer_id: int, user_id: int) -> None:
+	"""Экспорт AI настроек в JSON"""
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	settings = {
+		"temperature": RUNTIME_TEMPERATURE,
+		"top_p": RUNTIME_TOP_P,
+		"max_tokens_or": RUNTIME_MAX_TOKENS_OR,
+		"max_tokens_at": RUNTIME_MAX_TOKENS_AT,
+		"reasoning_enabled": RUNTIME_REASONING_ENABLED,
+		"reasoning_tokens": RUNTIME_REASONING_TOKENS,
+		"reasoning_depth": RUNTIME_REASONING_DEPTH,
+		"max_history": RUNTIME_MAX_HISTORY,
+		"max_ai_chars": RUNTIME_MAX_AI_CHARS,
+		"or_retries": RUNTIME_OR_RETRIES,
+		"at_retries": RUNTIME_AT_RETRIES,
+		"or_timeout": RUNTIME_OR_TIMEOUT,
+		"at_timeout": RUNTIME_AT_TIMEOUT,
+		"or_to_at_fallback": RUNTIME_OR_TO_AT_FALLBACK,
+		"ai_provider": RUNTIME_AI_PROVIDER,
+		"openrouter_model": RUNTIME_OPENROUTER_MODEL,
+		"aitunnel_model": RUNTIME_AITUNNEL_MODEL
+	}
+	
+	settings_json = json.dumps(settings, indent=2, ensure_ascii=False)
+	send_message(vk, peer_id, f"📋 AI настройки (JSON):\n\n```json\n{settings_json}\n```", keyboard=build_ai_settings_keyboard())
+
+
+def handle_admin_import_ai_settings(vk, peer_id: int, user_id: int, settings_json: str) -> None:
+	"""Импорт AI настроек из JSON"""
+	if user_id not in ADMIN_USER_IDS:
+		return
+	
+	try:
+		settings = json.loads(settings_json)
+		
+		# Обновляем только существующие параметры
+		global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+		global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
+		global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
+		global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
+		global RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL, RUNTIME_AITUNNEL_MODEL
+		
+		if "temperature" in settings:
+			RUNTIME_TEMPERATURE = float(settings["temperature"])
+		if "top_p" in settings:
+			RUNTIME_TOP_P = float(settings["top_p"])
+		if "max_tokens_or" in settings:
+			RUNTIME_MAX_TOKENS_OR = int(settings["max_tokens_or"])
+		if "max_tokens_at" in settings:
+			RUNTIME_MAX_TOKENS_AT = int(settings["max_tokens_at"])
+		if "reasoning_enabled" in settings:
+			RUNTIME_REASONING_ENABLED = bool(settings["reasoning_enabled"])
+		if "reasoning_tokens" in settings:
+			RUNTIME_REASONING_TOKENS = int(settings["reasoning_tokens"])
+		if "reasoning_depth" in settings:
+			RUNTIME_REASONING_DEPTH = str(settings["reasoning_depth"])
+		if "max_history" in settings:
+			RUNTIME_MAX_HISTORY = int(settings["max_history"])
+		if "max_ai_chars" in settings:
+			RUNTIME_MAX_AI_CHARS = int(settings["max_ai_chars"])
+		if "or_retries" in settings:
+			RUNTIME_OR_RETRIES = int(settings["or_retries"])
+		if "at_retries" in settings:
+			RUNTIME_AT_RETRIES = int(settings["at_retries"])
+		if "or_timeout" in settings:
+			RUNTIME_OR_TIMEOUT = int(settings["or_timeout"])
+		if "at_timeout" in settings:
+			RUNTIME_AT_TIMEOUT = int(settings["at_timeout"])
+		if "or_to_at_fallback" in settings:
+			RUNTIME_OR_TO_AT_FALLBACK = bool(settings["or_to_at_fallback"])
+		if "ai_provider" in settings:
+			RUNTIME_AI_PROVIDER = str(settings["ai_provider"])
+		if "openrouter_model" in settings:
+			RUNTIME_OPENROUTER_MODEL = str(settings["openrouter_model"])
+		if "aitunnel_model" in settings:
+			RUNTIME_AITUNNEL_MODEL = str(settings["aitunnel_model"])
+		
+		send_message(vk, peer_id, "✅ AI настройки импортированы", keyboard=build_ai_settings_keyboard())
+		
+	except json.JSONDecodeError:
+		send_message(vk, peer_id, "❌ Ошибка парсинга JSON", keyboard=build_ai_settings_keyboard())
+	except Exception as e:
+		send_message(vk, peer_id, f"❌ Ошибка импорта: {str(e)}", keyboard=build_ai_settings_keyboard())
 
 
 # ----- Викторина -----
@@ -2796,6 +3080,8 @@ def main() -> None:
 	logger.info(f"AI provider: {ai_provider}")
 	logger.info(f"OpenRouter models: {get_model_candidates()}")
 	logger.info(f"AITunnel models: {get_aitunnel_model_candidates()}")
+	logger.info(f"Runtime AI settings: temp={RUNTIME_TEMPERATURE}, top_p={RUNTIME_TOP_P}, max_tokens_OR={RUNTIME_MAX_TOKENS_OR}, max_tokens_AT={RUNTIME_MAX_TOKENS_AT}")
+	logger.info(f"Runtime AI settings: reasoning={RUNTIME_REASONING_ENABLED}, history={RUNTIME_MAX_HISTORY}, max_chars={RUNTIME_MAX_AI_CHARS}, fallback={RUNTIME_OR_TO_AT_FALLBACK}")
 	logger.info("Bot started. Listening for events...")
 
 	# Flask webhook сервер
@@ -3057,6 +3343,227 @@ def main() -> None:
 		if is_dm and text in {"/admin", "админ", "admin"}:
 			handle_admin_panel(vk, peer_id, user_id)
 			continue
+		if is_dm and text in {"/ai_settings", "ai_settings", "ai настройки"} and user_id in ADMIN_USER_IDS:
+			handle_admin_ai_settings(vk, peer_id, user_id)
+			continue
+		if is_dm and text in {"/ai_reset", "ai_reset", "ai сброс"} and user_id in ADMIN_USER_IDS:
+			handle_admin_reset_ai_settings(vk, peer_id, user_id)
+			continue
+		if is_dm and text in {"/ai_export", "ai_export", "ai экспорт"} and user_id in ADMIN_USER_IDS:
+			handle_admin_export_ai_settings(vk, peer_id, user_id)
+			continue
+		if is_dm and text in {"/ai_current", "ai_current", "ai текущий"} and user_id in ADMIN_USER_IDS:
+			handle_admin_current(vk, peer_id, user_id)
+			continue
+		if is_dm and text.startswith("/ai_provider ") and user_id in ADMIN_USER_IDS:
+			provider = text.split(" ", 1)[1].strip().upper()
+			if provider in {"OPENROUTER", "AITUNNEL", "AUTO"}:
+				global RUNTIME_AI_PROVIDER
+				RUNTIME_AI_PROVIDER = provider
+				send_message(vk, peer_id, f"✅ Провайдер ИИ изменен на: {provider}")
+			else:
+				send_message(vk, peer_id, "❌ Доступные провайдеры: OPENROUTER, AITUNNEL, AUTO")
+			continue
+		if is_dm and text.startswith("/ai_model ") and user_id in ADMIN_USER_IDS:
+			model = text.split(" ", 1)[1].strip()
+			if model:
+				handle_admin_set_model(vk, peer_id, user_id, model)
+			else:
+				send_message(vk, peer_id, "❌ Укажите название модели")
+			continue
+		if is_dm and text.startswith("/ai_temp ") and user_id in ADMIN_USER_IDS:
+			try:
+				temp = float(text.split(" ", 1)[1].strip())
+				if 0.0 <= temp <= 2.0:
+					global RUNTIME_TEMPERATURE
+					RUNTIME_TEMPERATURE = temp
+					send_message(vk, peer_id, f"✅ Температура изменена на: {temp}")
+				else:
+					send_message(vk, peer_id, "❌ Температура должна быть от 0.0 до 2.0")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_temp [0.0-2.0]")
+			continue
+		if is_dm and text.startswith("/ai_top_p ") and user_id in ADMIN_USER_IDS:
+			try:
+				top_p = float(text.split(" ", 1)[1].strip())
+				if 0.0 <= top_p <= 1.0:
+					global RUNTIME_TOP_P
+					RUNTIME_TOP_P = top_p
+					send_message(vk, peer_id, f"✅ Top-P изменен на: {top_p}")
+				else:
+					send_message(vk, peer_id, "❌ Top-P должен быть от 0.0 до 1.0")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_top_p [0.0-1.0]")
+			continue
+		if is_dm and text.startswith("/ai_max_tokens ") and user_id in ADMIN_USER_IDS:
+			try:
+				parts = text.split(" ", 2)
+				if len(parts) >= 3:
+					provider = parts[1].strip().upper()
+					tokens = int(parts[2].strip())
+					if tokens > 0:
+						if provider == "OR":
+							global RUNTIME_MAX_TOKENS_OR
+							RUNTIME_MAX_TOKENS_OR = tokens
+							send_message(vk, peer_id, f"✅ Макс. токены OpenRouter изменены на: {tokens}")
+						elif provider == "AT":
+							global RUNTIME_MAX_TOKENS_AT
+							RUNTIME_MAX_TOKENS_AT = tokens
+							send_message(vk, peer_id, f"✅ Макс. токены AITunnel изменены на: {tokens}")
+						else:
+							send_message(vk, peer_id, "❌ Укажите провайдера: OR или AT")
+					else:
+						send_message(vk, peer_id, "❌ Количество токенов должно быть больше 0")
+				else:
+					send_message(vk, peer_id, "❌ Использование: /ai_max_tokens [OR|AT] [число]")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_max_tokens [OR|AT] [число]")
+			continue
+		if is_dm and text.startswith("/ai_max_chars ") and user_id in ADMIN_USER_IDS:
+			try:
+				chars = int(text.split(" ", 1)[1].strip())
+				if 50 <= chars <= 1000:
+					global RUNTIME_MAX_AI_CHARS
+					RUNTIME_MAX_AI_CHARS = chars
+					send_message(vk, peer_id, f"✅ Макс. символы изменены на: {chars}")
+				else:
+					send_message(vk, peer_id, "❌ Количество символов должно быть от 50 до 1000")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_max_chars [50-1000]")
+			continue
+		if is_dm and text.startswith("/ai_history ") and user_id in ADMIN_USER_IDS:
+			try:
+				history = int(text.split(" ", 1)[1].strip())
+				if 1 <= history <= 20:
+					global RUNTIME_MAX_HISTORY
+					RUNTIME_MAX_HISTORY = history
+					send_message(vk, peer_id, f"✅ Макс. история изменена на: {history}")
+				else:
+					send_message(vk, peer_id, "❌ История должна быть от 1 до 20")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_history [1-20]")
+			continue
+		if is_dm and text.startswith("/ai_reasoning ") and user_id in ADMIN_USER_IDS:
+			try:
+				parts = text.split(" ", 2)
+				if len(parts) >= 2:
+					action = parts[1].strip().lower()
+					if action in {"on", "вкл", "true", "1"}:
+						global RUNTIME_REASONING_ENABLED
+						RUNTIME_REASONING_ENABLED = True
+						send_message(vk, peer_id, "✅ Reasoning включен")
+					elif action in {"off", "выкл", "false", "0"}:
+						global RUNTIME_REASONING_ENABLED
+						RUNTIME_REASONING_ENABLED = False
+						send_message(vk, peer_id, "✅ Reasoning выключен")
+					elif action == "tokens" and len(parts) >= 3:
+						tokens = int(parts[2].strip())
+						if 10 <= tokens <= 500:
+							global RUNTIME_REASONING_TOKENS
+							RUNTIME_REASONING_TOKENS = tokens
+							send_message(vk, peer_id, f"✅ Reasoning токены изменены на: {tokens}")
+						else:
+							send_message(vk, peer_id, "❌ Reasoning токены должны быть от 10 до 500")
+					elif action == "depth" and len(parts) >= 3:
+						depth = parts[2].strip().lower()
+						if depth in {"low", "medium", "high"}:
+							global RUNTIME_REASONING_DEPTH
+							RUNTIME_REASONING_DEPTH = depth
+							send_message(vk, peer_id, f"✅ Reasoning глубина изменена на: {depth}")
+						else:
+							send_message(vk, peer_id, "❌ Доступные значения: low, medium, high")
+					else:
+						send_message(vk, peer_id, "❌ Использование: /ai_reasoning [on|off|tokens|depth] [значение]")
+				else:
+					send_message(vk, peer_id, "❌ Использование: /ai_reasoning [on|off|tokens|depth] [значение]")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_reasoning [on|off|tokens|depth] [значение]")
+			continue
+		if is_dm and text.startswith("/ai_fallback ") and user_id in ADMIN_USER_IDS:
+			try:
+				action = text.split(" ", 1)[1].strip().lower()
+				if action in {"on", "вкл", "true", "1"}:
+					global RUNTIME_OR_TO_AT_FALLBACK
+					RUNTIME_OR_TO_AT_FALLBACK = True
+					send_message(vk, peer_id, "✅ Fallback OpenRouter→AITunnel включен")
+				elif action in {"off", "выкл", "false", "0"}:
+					global RUNTIME_OR_TO_AT_FALLBACK
+					RUNTIME_OR_TO_AT_FALLBACK = False
+					send_message(vk, peer_id, "✅ Fallback OpenRouter→AITunnel выключен")
+				else:
+					send_message(vk, peer_id, "❌ Использование: /ai_fallback [on|off]")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_fallback [on|off]")
+			continue
+		if is_dm and text.startswith("/ai_timeout ") and user_id in ADMIN_USER_IDS:
+			try:
+				parts = text.split(" ", 2)
+				if len(parts) >= 3:
+					provider = parts[1].strip().upper()
+					timeout = int(parts[2].strip())
+					if 10 <= timeout <= 300:
+						if provider == "OR":
+							global RUNTIME_OR_TIMEOUT
+							RUNTIME_OR_TIMEOUT = timeout
+							send_message(vk, peer_id, f"✅ Таймаут OpenRouter изменен на: {timeout}s")
+						elif provider == "AT":
+							global RUNTIME_AT_TIMEOUT
+							RUNTIME_AT_TIMEOUT = timeout
+							send_message(vk, peer_id, f"✅ Таймаут AITunnel изменен на: {timeout}s")
+						else:
+							send_message(vk, peer_id, "❌ Укажите провайдера: OR или AT")
+					else:
+						send_message(vk, peer_id, "❌ Таймаут должен быть от 10 до 300 секунд")
+				else:
+					send_message(vk, peer_id, "❌ Использование: /ai_timeout [OR|AT] [10-300]")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_timeout [OR|AT] [10-300]")
+			continue
+		if is_dm and text.startswith("/ai_retries ") and user_id in ADMIN_USER_IDS:
+			try:
+				parts = text.split(" ", 2)
+				if len(parts) >= 3:
+					provider = parts[1].strip().upper()
+					retries = int(parts[2].strip())
+					if 1 <= retries <= 5:
+						if provider == "OR":
+							global RUNTIME_OR_RETRIES
+							RUNTIME_OR_RETRIES = retries
+							send_message(vk, peer_id, f"✅ Ретраи OpenRouter изменены на: {retries}")
+						elif provider == "AT":
+							global RUNTIME_AT_RETRIES
+							RUNTIME_AT_RETRIES = retries
+							send_message(vk, peer_id, f"✅ Ретраи AITunnel изменены на: {retries}")
+						else:
+							send_message(vk, peer_id, "❌ Укажите провайдера: OR или AT")
+					else:
+						send_message(vk, peer_id, "❌ Ретраи должны быть от 1 до 5")
+				else:
+					send_message(vk, peer_id, "❌ Использование: /ai_retries [OR|AT] [1-5]")
+			except (ValueError, IndexError):
+				send_message(vk, peer_id, "❌ Использование: /ai_retries [OR|AT] [1-5]")
+			continue
+		if is_dm and text.startswith("/ai_provider ") and user_id in ADMIN_USER_IDS:
+			provider = text.split(" ", 1)[1].strip().upper()
+			if provider in {"OPENROUTER", "AITUNNEL", "AUTO"}:
+				global RUNTIME_AI_PROVIDER
+				RUNTIME_AI_PROVIDER = provider
+				send_message(vk, peer_id, f"✅ Провайдер ИИ изменен на: {provider}")
+			else:
+				send_message(vk, peer_id, "❌ Доступные провайдеры: OPENROUTER, AITUNNEL, AUTO")
+			continue
+		
+		# Импорт AI настроек из JSON (только в ЛС админам)
+		if is_dm and user_id in ADMIN_USER_IDS and text.strip().startswith("{"):
+			try:
+				# Пытаемся распарсить как JSON
+				json.loads(text)
+				# Если успешно - это JSON, пробуем импортировать настройки
+				handle_admin_import_ai_settings(vk, peer_id, user_id, text)
+				continue
+			except json.JSONDecodeError:
+				# Не JSON - продолжаем обычную обработку
+				pass
 
 		action = payload.get("action") if isinstance(payload, dict) else None
 
@@ -3196,6 +3703,169 @@ def main() -> None:
 			logging.getLogger("vk-mafia-bot").info(f"Admin payload: admin_current from user={user_id} peer={peer_id}")
 			handle_admin_current(vk, peer_id, user_id)
 			continue
+		
+		# AI настройки
+		if action == "ai_temp_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_TEMPERATURE
+				RUNTIME_TEMPERATURE = max(0.0, RUNTIME_TEMPERATURE - 0.1)
+				send_message(vk, peer_id, f"OK. Температура: {RUNTIME_TEMPERATURE:.1f}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_temp_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_TEMPERATURE
+				RUNTIME_TEMPERATURE = min(2.0, RUNTIME_TEMPERATURE + 0.1)
+				send_message(vk, peer_id, f"OK. Температура: {RUNTIME_TEMPERATURE:.1f}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_top_p_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_TOP_P
+				RUNTIME_TOP_P = max(0.0, RUNTIME_TOP_P - 0.1)
+				send_message(vk, peer_id, f"OK. Top-P: {RUNTIME_TOP_P:.1f}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_top_p_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_TOP_P
+				RUNTIME_TOP_P = min(1.0, RUNTIME_TOP_P + 0.1)
+				send_message(vk, peer_id, f"OK. Top-P: {RUNTIME_TOP_P:.1f}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_max_or_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_TOKENS_OR
+				RUNTIME_MAX_TOKENS_OR = max(10, RUNTIME_MAX_TOKENS_OR - 10)
+				send_message(vk, peer_id, f"OK. Макс. токены OpenRouter: {RUNTIME_MAX_TOKENS_OR}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_max_or_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_TOKENS_OR
+				RUNTIME_MAX_TOKENS_OR = min(1000, RUNTIME_MAX_TOKENS_OR + 10)
+				send_message(vk, peer_id, f"OK. Макс. токены OpenRouter: {RUNTIME_MAX_TOKENS_OR}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_max_at_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_TOKENS_AT
+				RUNTIME_MAX_TOKENS_AT = max(100, RUNTIME_MAX_TOKENS_AT - 100)
+				send_message(vk, peer_id, f"OK. Макс. токены AITunnel: {RUNTIME_MAX_TOKENS_AT}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_max_at_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_TOKENS_AT
+				RUNTIME_MAX_TOKENS_AT = min(10000, RUNTIME_MAX_TOKENS_AT + 100)
+				send_message(vk, peer_id, f"OK. Макс. токены AITunnel: {RUNTIME_MAX_TOKENS_AT}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_reason_toggle":
+			if user_id in ADMIN_USER_IDS:
+				handle_admin_toggle_reasoning(vk, peer_id, user_id)
+			continue
+		if action == "ai_reason_tokens_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_REASONING_TOKENS
+				RUNTIME_REASONING_TOKENS = max(10, RUNTIME_REASONING_TOKENS - 10)
+				send_message(vk, peer_id, f"OK. Reasoning токены: {RUNTIME_REASONING_TOKENS}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_reason_tokens_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_REASONING_TOKENS
+				RUNTIME_REASONING_TOKENS = min(500, RUNTIME_REASONING_TOKENS + 10)
+				send_message(vk, peer_id, f"OK. Reasoning токены: {RUNTIME_REASONING_TOKENS}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_reason_depth_cycle":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_REASONING_DEPTH
+				depths = ["low", "medium", "high"]
+				current_idx = depths.index(RUNTIME_REASONING_DEPTH) if RUNTIME_REASONING_DEPTH in depths else 0
+				RUNTIME_REASONING_DEPTH = depths[(current_idx + 1) % len(depths)]
+				send_message(vk, peer_id, f"OK. Reasoning глубина: {RUNTIME_REASONING_DEPTH}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_hist_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_HISTORY
+				RUNTIME_MAX_HISTORY = max(1, RUNTIME_MAX_HISTORY - 1)
+				send_message(vk, peer_id, f"OK. Макс. история: {RUNTIME_MAX_HISTORY}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_hist_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_HISTORY
+				RUNTIME_MAX_HISTORY = min(20, RUNTIME_MAX_HISTORY + 1)
+				send_message(vk, peer_id, f"OK. Макс. история: {RUNTIME_MAX_HISTORY}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_chars_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_AI_CHARS
+				RUNTIME_MAX_AI_CHARS = max(50, RUNTIME_MAX_AI_CHARS - 10)
+				send_message(vk, peer_id, f"OK. Макс. символы: {RUNTIME_MAX_AI_CHARS}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_chars_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_MAX_AI_CHARS
+				RUNTIME_MAX_AI_CHARS = min(1000, RUNTIME_MAX_AI_CHARS + 10)
+				send_message(vk, peer_id, f"OK. Макс. символы: {RUNTIME_MAX_AI_CHARS}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_or_retries_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_OR_RETRIES
+				RUNTIME_OR_RETRIES = max(1, RUNTIME_OR_RETRIES - 1)
+				send_message(vk, peer_id, f"OK. Ретраи OpenRouter: {RUNTIME_OR_RETRIES}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_or_retries_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_OR_RETRIES
+				RUNTIME_OR_RETRIES = min(5, RUNTIME_OR_RETRIES + 1)
+				send_message(vk, peer_id, f"OK. Ретраи OpenRouter: {RUNTIME_OR_RETRIES}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_at_retries_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_AT_RETRIES
+				RUNTIME_AT_RETRIES = max(1, RUNTIME_AT_RETRIES - 1)
+				send_message(vk, peer_id, f"OK. Ретраи AITunnel: {RUNTIME_AT_RETRIES}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_at_retries_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_AT_RETRIES
+				RUNTIME_AT_RETRIES = min(5, RUNTIME_AT_RETRIES + 1)
+				send_message(vk, peer_id, f"OK. Ретраи AITunnel: {RUNTIME_AT_RETRIES}", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_or_timeout_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_OR_TIMEOUT
+				RUNTIME_OR_TIMEOUT = max(10, RUNTIME_OR_TIMEOUT - 10)
+				send_message(vk, peer_id, f"OK. Таймаут OpenRouter: {RUNTIME_OR_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_or_timeout_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_OR_TIMEOUT
+				RUNTIME_OR_TIMEOUT = min(300, RUNTIME_OR_TIMEOUT + 10)
+				send_message(vk, peer_id, f"OK. Таймаут OpenRouter: {RUNTIME_OR_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_at_timeout_down":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_AT_TIMEOUT
+				RUNTIME_AT_TIMEOUT = max(10, RUNTIME_AT_TIMEOUT - 10)
+				send_message(vk, peer_id, f"OK. Таймаут AITunnel: {RUNTIME_AT_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_at_timeout_up":
+			if user_id in ADMIN_USER_IDS:
+				global RUNTIME_AT_TIMEOUT
+				RUNTIME_AT_TIMEOUT = min(300, RUNTIME_AT_TIMEOUT + 10)
+				send_message(vk, peer_id, f"OK. Таймаут AITunnel: {RUNTIME_AT_TIMEOUT}s", keyboard=build_ai_settings_keyboard())
+			continue
+		if action == "ai_fallback_toggle":
+			if user_id in ADMIN_USER_IDS:
+				handle_admin_toggle_fallback(vk, peer_id, user_id)
+			continue
+		if action == "ai_reset_settings":
+			if user_id in ADMIN_USER_IDS:
+				handle_admin_reset_ai_settings(vk, peer_id, user_id)
+			continue
+		if action == "ai_export_settings":
+			if user_id in ADMIN_USER_IDS:
+				handle_admin_export_ai_settings(vk, peer_id, user_id)
+			continue
+		if action == "ai_import_settings":
+			if user_id in ADMIN_USER_IDS:
+				send_message(vk, peer_id, "📥 Отправьте JSON с настройками в следующем сообщении", keyboard=build_ai_settings_keyboard())
+			continue
+		
 		if action == "admin_close":
 			if user_id in ADMIN_USER_IDS:
 				send_message(vk, peer_id, "Админ‑панель закрыта.", keyboard=build_dm_keyboard() if peer_id < 2000000000 else build_main_keyboard())
