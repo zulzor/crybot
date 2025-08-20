@@ -173,6 +173,53 @@ def _build_shop_inline_keyboard(economy: object) -> str:
     return _build_inline_keyboard(rows)
 
 
+# ---------- Бизнес: inline меню ----------
+
+
+def _build_business_inline_keyboard() -> str:
+    rows = [
+        [("💳 Баланс", {"action": "business_action", "value": "balance"}), ("🎁 Ежедневный", {"action": "business_action", "value": "daily"})],
+        [("🏪 Магазин", {"action": "business_action", "value": "shop"}), ("📦 Инвентарь", {"action": "business_action", "value": "inventory"})],
+    ]
+    return _build_inline_keyboard(rows)
+
+
+def _handle_business(ctx: RouterContext) -> Optional[str]:
+    from economy_social import economy_manager
+    text = t(ctx.user_id, "shop_title")
+    kb = _build_business_inline_keyboard()
+    _send_with_keyboard(ctx, text, kb)
+    return None
+
+
+def _handle_business_action(ctx: RouterContext) -> Optional[str]:
+    from economy_social import economy_manager, Currency
+    action = ctx.text.strip().lower()
+    if action == "balance":
+        wallet = economy_manager.get_wallet(ctx.user_id)
+        bal = wallet.balance.get(Currency.CRYCOIN, 0)
+        _send_with_keyboard(ctx, f"💰 Баланс: {bal} 🪙", _build_business_inline_keyboard())
+        return None
+    if action == "daily":
+        msg = economy_manager.daily_bonus(ctx.user_id)
+        _send_with_keyboard(ctx, msg, _build_business_inline_keyboard())
+        return None
+    if action == "shop":
+        msg = economy_manager.get_shop()
+        _send_with_keyboard(ctx, msg, _build_shop_inline_keyboard(economy_manager))
+        return None
+    if action == "inventory":
+        inv = economy_manager.get_inventory(ctx.user_id)
+        if not inv.items:
+            _send_with_keyboard(ctx, "📦 Инвентарь пуст", _build_business_inline_keyboard())
+            return None
+        lines = ["📦 Инвентарь:"]
+        for iid, qty in inv.items.items():
+            lines.append(f"• {iid}: x{qty}")
+        _send_with_keyboard(ctx, "\n".join(lines), _build_business_inline_keyboard())
+        return None
+    return None
+
 def _cleanup_hits(hits: List[float], now_ts: float, window_sec: int) -> None:
     # Удаляем старые записи
     cutoff = now_ts - window_sec
@@ -566,6 +613,15 @@ def _register_builtin_commands() -> None:
             aliases=["shop", "магазин"],
             description="Показать магазин",
             handler=_handle_shop,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/business",
+            aliases=["business", "бизнес"],
+            description="Космический бизнес — меню",
+            handler=_handle_business,
             admin_required=False,
         )
     )

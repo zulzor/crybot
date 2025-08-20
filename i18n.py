@@ -10,6 +10,7 @@ from economy_social import social_manager
 RU: Dict[str, str] = {
     "help_title": "CryBot — команды:",
     "shop_title": "🛒 Магазин:",
+    "business_title": "🏢 Космический бизнес",
     "admin_menu": "Админ‑меню:",
     "select_storage": "Выберите бэкенд хранилища:",
     "select_lang": "Выберите язык интерфейса:",
@@ -19,6 +20,7 @@ RU: Dict[str, str] = {
 EN: Dict[str, str] = {
     "help_title": "CryBot — commands:",
     "shop_title": "🛒 Shop:",
+    "business_title": "🏢 Cosmic Business",
     "admin_menu": "Admin menu:",
     "select_storage": "Select storage backend:",
     "select_lang": "Choose interface language:",
