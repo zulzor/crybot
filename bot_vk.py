@@ -1673,19 +1673,17 @@ def build_admin_keyboard() -> str:
 def build_ai_models_keyboard() -> str:
 	"""Клавиатура для выбора AI моделей"""
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	# OpenRouter бесплатные
+	# OpenRouter (до 4 кнопок в строке, чтобы держать число строк < 10)
 	keyboard.add_button("deepseek-r1-distill", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-distill-llama-70b:free"})
 	keyboard.add_button("deepseek-chat-v3", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-chat-v3-0324:free"})
-	keyboard.add_line()
 	keyboard.add_button("deepseek-r1-0528", color=VkKeyboardColor.PRIMARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1-0528:free"})
 	keyboard.add_button("qwen3-coder", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "qwen/qwen3-coder:free"})
 	keyboard.add_line()
 	keyboard.add_button("deepseek-r1-free", color=VkKeyboardColor.SECONDARY, payload={"action": "admin_set_model", "model": "deepseek/deepseek-r1:free"})
 	keyboard.add_line()
-	# AITunnel платные
+	# AITunnel
 	keyboard.add_button("gpt-5-nano", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gpt-5-nano"})
 	keyboard.add_button("gpt-3.5-turbo", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gpt-3.5-turbo"})
-	keyboard.add_line()
 	keyboard.add_button("deepseek-chat", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "deepseek-chat"})
 	keyboard.add_button("gemini-flash-8b", color=VkKeyboardColor.POSITIVE, payload={"action": "admin_set_model", "model": "gemini-flash-1.5-8b"})
 	keyboard.add_line()
@@ -3080,6 +3078,7 @@ def main() -> None:
 			continue
 		if action == "admin_ai_models":
 			if user_id in ADMIN_USER_IDS:
+				logging.getLogger("vk-mafia-bot").info(f"Admin payload: admin_ai_models from user={user_id} peer={peer_id}")
 				send_message(vk, peer_id, "Выберите ИИ модель:", keyboard=build_ai_models_keyboard())
 			continue
 		if action == "admin_users":
@@ -3102,9 +3101,11 @@ def main() -> None:
 		# Админ-панель: выбор модели
 		if action == "admin_set_model":
 			model_name = payload.get("model") if isinstance(payload, dict) else None
+			logging.getLogger("vk-mafia-bot").info(f"Admin payload: admin_set_model model={model_name} from user={user_id} peer={peer_id}")
 			handle_admin_set_model(vk, peer_id, user_id, model_name or "")
 			continue
 		if action == "admin_current":
+			logging.getLogger("vk-mafia-bot").info(f"Admin payload: admin_current from user={user_id} peer={peer_id}")
 			handle_admin_current(vk, peer_id, user_id)
 			continue
 		if action == "admin_close":
