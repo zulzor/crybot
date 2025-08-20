@@ -2466,7 +2466,6 @@ def handle_admin_panel(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> None:
-	global RUNTIME_AITUNNEL_MODEL, RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL
 	if user_id not in ADMIN_USER_IDS:
 		return
 	model = (model_name or "").strip()
@@ -2525,7 +2524,6 @@ def handle_admin_ai_settings(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_set_temperature(vk, peer_id: int, user_id: int, value: str) -> None:
-	global RUNTIME_TEMPERATURE
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2541,7 +2539,6 @@ def handle_admin_set_temperature(vk, peer_id: int, user_id: int, value: str) -> 
 
 
 def handle_admin_set_top_p(vk, peer_id: int, user_id: int, value: str) -> None:
-	global RUNTIME_TOP_P
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2557,7 +2554,6 @@ def handle_admin_set_top_p(vk, peer_id: int, user_id: int, value: str) -> None:
 
 
 def handle_admin_set_max_tokens(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
-	global RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2579,7 +2575,6 @@ def handle_admin_set_max_tokens(vk, peer_id: int, user_id: int, provider: str, v
 
 
 def handle_admin_set_max_chars(vk, peer_id: int, user_id: int, value: str) -> None:
-	global RUNTIME_MAX_AI_CHARS
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2595,7 +2590,6 @@ def handle_admin_set_max_chars(vk, peer_id: int, user_id: int, value: str) -> No
 
 
 def handle_admin_set_history(vk, peer_id: int, user_id: int, value: str) -> None:
-	global RUNTIME_MAX_HISTORY
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2611,7 +2605,6 @@ def handle_admin_set_history(vk, peer_id: int, user_id: int, value: str) -> None
 
 
 def handle_admin_set_timeout(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
-	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2633,7 +2626,6 @@ def handle_admin_set_timeout(vk, peer_id: int, user_id: int, provider: str, valu
 
 
 def handle_admin_toggle_reasoning(vk, peer_id: int, user_id: int) -> None:
-	global RUNTIME_REASONING_ENABLED
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2643,7 +2635,6 @@ def handle_admin_toggle_reasoning(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_toggle_fallback(vk, peer_id: int, user_id: int) -> None:
-	global RUNTIME_OR_TO_AT_FALLBACK
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2654,11 +2645,6 @@ def handle_admin_toggle_fallback(vk, peer_id: int, user_id: int) -> None:
 
 def handle_admin_reset_ai_settings(vk, peer_id: int, user_id: int) -> None:
 	"""Сброс всех AI настроек к значениям по умолчанию"""
-	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
-	global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
-	global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
-	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
-	
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2719,11 +2705,6 @@ def handle_admin_import_ai_settings(vk, peer_id: int, user_id: int, settings_jso
 		settings = json.loads(settings_json)
 		
 		# Обновляем только существующие параметры
-		global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
-		global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
-		global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
-		global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
-		global RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL, RUNTIME_AITUNNEL_MODEL
 		
 		if "temperature" in settings:
 			RUNTIME_TEMPERATURE = float(settings["temperature"])
@@ -3060,6 +3041,13 @@ def add_history(peer_id: int, role: str, content: str) -> None:
 
 # ---------- Основной цикл ----------
 def main() -> None:
+	# Объявляем все глобальные переменные в начале функции
+	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+	global RUNTIME_MAX_AI_CHARS, RUNTIME_MAX_HISTORY, RUNTIME_REASONING_ENABLED
+	global RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH, RUNTIME_AI_PROVIDER
+	global RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES, RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
+	global RUNTIME_OR_TO_AT_FALLBACK, RUNTIME_OPENROUTER_MODEL
+	
 	configure_logging()
 	load_dotenv()
 	load_profiles()
@@ -3375,7 +3363,6 @@ def main() -> None:
 			try:
 				temp = float(text.split(" ", 1)[1].strip())
 				if 0.0 <= temp <= 2.0:
-					global RUNTIME_TEMPERATURE
 					RUNTIME_TEMPERATURE = temp
 					send_message(vk, peer_id, f"✅ Температура изменена на: {temp}")
 				else:
@@ -3387,7 +3374,6 @@ def main() -> None:
 			try:
 				top_p = float(text.split(" ", 1)[1].strip())
 				if 0.0 <= top_p <= 1.0:
-					global RUNTIME_TOP_P
 					RUNTIME_TOP_P = top_p
 					send_message(vk, peer_id, f"✅ Top-P изменен на: {top_p}")
 				else:
@@ -3403,11 +3389,9 @@ def main() -> None:
 					tokens = int(parts[2].strip())
 					if tokens > 0:
 						if provider == "OR":
-							global RUNTIME_MAX_TOKENS_OR
 							RUNTIME_MAX_TOKENS_OR = tokens
 							send_message(vk, peer_id, f"✅ Макс. токены OpenRouter изменены на: {tokens}")
 						elif provider == "AT":
-							global RUNTIME_MAX_TOKENS_AT
 							RUNTIME_MAX_TOKENS_AT = tokens
 							send_message(vk, peer_id, f"✅ Макс. токены AITunnel изменены на: {tokens}")
 						else:
@@ -3423,7 +3407,6 @@ def main() -> None:
 			try:
 				chars = int(text.split(" ", 1)[1].strip())
 				if 50 <= chars <= 1000:
-					global RUNTIME_MAX_AI_CHARS
 					RUNTIME_MAX_AI_CHARS = chars
 					send_message(vk, peer_id, f"✅ Макс. символы изменены на: {chars}")
 				else:
@@ -3435,7 +3418,6 @@ def main() -> None:
 			try:
 				history = int(text.split(" ", 1)[1].strip())
 				if 1 <= history <= 20:
-					global RUNTIME_MAX_HISTORY
 					RUNTIME_MAX_HISTORY = history
 					send_message(vk, peer_id, f"✅ Макс. история изменена на: {history}")
 				else:
@@ -3449,17 +3431,14 @@ def main() -> None:
 				if len(parts) >= 2:
 					action = parts[1].strip().lower()
 					if action in {"on", "вкл", "true", "1"}:
-						global RUNTIME_REASONING_ENABLED
 						RUNTIME_REASONING_ENABLED = True
 						send_message(vk, peer_id, "✅ Reasoning включен")
 					elif action in {"off", "выкл", "false", "0"}:
-						global RUNTIME_REASONING_ENABLED
 						RUNTIME_REASONING_ENABLED = False
 						send_message(vk, peer_id, "✅ Reasoning выключен")
 					elif action == "tokens" and len(parts) >= 3:
 						tokens = int(parts[2].strip())
 						if 10 <= tokens <= 500:
-							global RUNTIME_REASONING_TOKENS
 							RUNTIME_REASONING_TOKENS = tokens
 							send_message(vk, peer_id, f"✅ Reasoning токены изменены на: {tokens}")
 						else:
@@ -3467,7 +3446,6 @@ def main() -> None:
 					elif action == "depth" and len(parts) >= 3:
 						depth = parts[2].strip().lower()
 						if depth in {"low", "medium", "high"}:
-							global RUNTIME_REASONING_DEPTH
 							RUNTIME_REASONING_DEPTH = depth
 							send_message(vk, peer_id, f"✅ Reasoning глубина изменена на: {depth}")
 						else:
@@ -3483,11 +3461,9 @@ def main() -> None:
 			try:
 				action = text.split(" ", 1)[1].strip().lower()
 				if action in {"on", "вкл", "true", "1"}:
-					global RUNTIME_OR_TO_AT_FALLBACK
 					RUNTIME_OR_TO_AT_FALLBACK = True
 					send_message(vk, peer_id, "✅ Fallback OpenRouter→AITunnel включен")
 				elif action in {"off", "выкл", "false", "0"}:
-					global RUNTIME_OR_TO_AT_FALLBACK
 					RUNTIME_OR_TO_AT_FALLBACK = False
 					send_message(vk, peer_id, "✅ Fallback OpenRouter→AITunnel выключен")
 				else:
@@ -3503,11 +3479,9 @@ def main() -> None:
 					timeout = int(parts[2].strip())
 					if 10 <= timeout <= 300:
 						if provider == "OR":
-							global RUNTIME_OR_TIMEOUT
 							RUNTIME_OR_TIMEOUT = timeout
 							send_message(vk, peer_id, f"✅ Таймаут OpenRouter изменен на: {timeout}s")
 						elif provider == "AT":
-							global RUNTIME_AT_TIMEOUT
 							RUNTIME_AT_TIMEOUT = timeout
 							send_message(vk, peer_id, f"✅ Таймаут AITunnel изменен на: {timeout}s")
 						else:
