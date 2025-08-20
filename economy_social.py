@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 from enum import Enum
+from storage import get_storage_from_env
 
 
 # -------- Экономика --------
@@ -53,6 +54,7 @@ class EconomyManager:
         self.inventories: Dict[int, UserInventory] = {}
         self.shop_items: Dict[str, ShopItem] = {}
         self._init_shop()
+        self._storage = get_storage_from_env()
     
     def _init_shop(self):
         """Инициализация магазина"""
@@ -95,14 +97,36 @@ class EconomyManager:
         )
     
     def get_wallet(self, user_id: int) -> UserWallet:
-        if user_id not in self.wallets:
-            self.wallets[user_id] = UserWallet(user_id=user_id)
-        return self.wallets[user_id]
+        if user_id in self.wallets:
+            return self.wallets[user_id]
+        # попробовать из хранилища
+        data = self._storage.get("wallets", str(user_id))
+        if data:
+            w = UserWallet(user_id=int(data.get("user_id", user_id)))
+            w.balance = {Currency[k]: v for k, v in data.get("balance", {}).items()} if data.get("balance") else w.balance
+            w.last_daily = float(data.get("last_daily", 0))
+            w.daily_streak = int(data.get("daily_streak", 0))
+            w.total_earned = int(data.get("total_earned", 0))
+            w.total_spent = int(data.get("total_spent", 0))
+            self.wallets[user_id] = w
+            return w
+        w = UserWallet(user_id=user_id)
+        self.wallets[user_id] = w
+        return w
     
     def get_inventory(self, user_id: int) -> UserInventory:
-        if user_id not in self.inventories:
-            self.inventories[user_id] = UserInventory(user_id=user_id)
-        return self.inventories[user_id]
+        if user_id in self.inventories:
+            return self.inventories[user_id]
+        data = self._storage.get("inventories", str(user_id))
+        if data:
+            inv = UserInventory(user_id=int(data.get("user_id", user_id)))
+            inv.items = {str(k): int(v) for k, v in data.get("items", {}).items()}
+            inv.equipped = {str(k): str(v) for k, v in data.get("equipped", {}).items()}
+            self.inventories[user_id] = inv
+            return inv
+        inv = UserInventory(user_id=user_id)
+        self.inventories[user_id] = inv
+        return inv
     
     def add_money(self, user_id: int, amount: int, currency: Currency = Currency.CRYCOIN) -> str:
         wallet = self.get_wallet(user_id)
@@ -111,6 +135,15 @@ class EconomyManager:
         
         wallet.balance[currency] += amount
         wallet.total_earned += amount
+        # persist
+        self._storage.set("wallets", str(user_id), {
+            "user_id": user_id,
+            "balance": {k.name: v for k, v in wallet.balance.items()},
+            "last_daily": wallet.last_daily,
+            "daily_streak": wallet.daily_streak,
+            "total_earned": wallet.total_earned,
+            "total_spent": wallet.total_spent,
+        })
         
         return f"💰 +{amount} {currency.value}\nБаланс: {wallet.balance[currency]} {currency.value}"
     
@@ -121,6 +154,14 @@ class EconomyManager:
         
         wallet.balance[currency] -= amount
         wallet.total_spent += amount
+        self._storage.set("wallets", str(user_id), {
+            "user_id": user_id,
+            "balance": {k.name: v for k, v in wallet.balance.items()},
+            "last_daily": wallet.last_daily,
+            "daily_streak": wallet.daily_streak,
+            "total_earned": wallet.total_earned,
+            "total_spent": wallet.total_spent,
+        })
         return True
     
     def daily_bonus(self, user_id: int) -> str:
@@ -145,6 +186,14 @@ class EconomyManager:
         
         wallet.balance[Currency.CRYCOIN] += total_bonus
         wallet.total_earned += total_bonus
+        self._storage.set("wallets", str(user_id), {
+            "user_id": user_id,
+            "balance": {k.name: v for k, v in wallet.balance.items()},
+            "last_daily": wallet.last_daily,
+            "daily_streak": wallet.daily_streak,
+            "total_earned": wallet.total_earned,
+            "total_spent": wallet.total_spent,
+        })
         
         return (
             f"🎁 Ежедневный бонус!\n"
@@ -169,6 +218,11 @@ class EconomyManager:
             inventory.items[item_id] += item.stack_size
         else:
             inventory.items[item_id] = item.stack_size
+        self._storage.set("inventories", str(user_id), {
+            "user_id": user_id,
+            "items": inventory.items,
+            "equipped": inventory.equipped,
+        })
         
         return (
             f"✅ Покупка совершена!\n"
