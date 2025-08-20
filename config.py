@@ -3,9 +3,11 @@
 """
 import os
 import json
+import shutil
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from pathlib import Path
+from datetime import datetime
 
 # ---------- Базовые настройки ----------
 @dataclass
@@ -174,8 +176,20 @@ class BotConfig:
     def save_to_file(self, filename: str = "config.json") -> bool:
         """Сохраняет конфигурацию в файл"""
         try:
-            with open(filename, 'w', encoding='utf-8') as f:
+            # Подготовка резервной копии, если файл существует
+            target_path = Path(filename)
+            if target_path.exists():
+                backups_dir = Path("backups")
+                backups_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup_path = backups_dir / f"config-{ts}.json"
+                shutil.copy2(target_path, backup_path)
+
+            # Атомарная запись через временный файл
+            tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, target_path)
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
@@ -447,4 +461,46 @@ def import_config(config_json: str) -> bool:
         return True
     except Exception as e:
         print(f"Error importing config: {e}")
+        return False
+
+# ---------- Резервные копии конфигурации ----------
+def backup_config_file(filename: str = "config.json", backup_dir: str = "backups") -> Optional[str]:
+    """Создает резервную копию файла конфигурации. Возвращает путь к бэкапу или None."""
+    try:
+        src = Path(filename)
+        if not src.exists():
+            return None
+        backups_dir = Path(backup_dir)
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = backups_dir / f"config-{ts}.json"
+        shutil.copy2(src, backup_path)
+        return str(backup_path)
+    except Exception as e:
+        print(f"Error creating backup: {e}")
+        return None
+
+def list_config_backups(backup_dir: str = "backups") -> List[str]:
+    """Возвращает список путей к доступным бэкапам конфигурации (по убыванию даты)."""
+    backups_dir = Path(backup_dir)
+    if not backups_dir.exists():
+        return []
+    backups = sorted((str(p) for p in backups_dir.glob("config-*.json")), reverse=True)
+    return backups
+
+def restore_config_from_backup(backup_path: str, target_filename: str = "config.json") -> bool:
+    """Восстанавливает конфигурацию из указанного бэкапа."""
+    try:
+        src = Path(backup_path)
+        if not src.exists():
+            print(f"Backup file not found: {backup_path}")
+            return False
+        dst = Path(target_filename)
+        # Атомарная замена
+        tmp_path = dst.with_suffix(dst.suffix + ".restore.tmp")
+        shutil.copy2(src, tmp_path)
+        os.replace(tmp_path, dst)
+        return True
+    except Exception as e:
+        print(f"Error restoring backup: {e}")
         return False
