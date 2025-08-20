@@ -2142,13 +2142,12 @@ def generate_ai_reply(user_text: str, system_prompt: str, history: List[Dict[str
 		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
 
 	# AUTO
-	if is_aitunnel_ready:
-		reply = aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
-		# Если ответ дружелюбная заглушка или сообщение о недоступности — пробуем OpenRouter
-		if reply and not reply.startswith("ИИ временно недоступен") and reply != "Хм, не расслышала. Скажи иначе, пожалуйста.":
-			return reply
+	# Сначала пробуем OpenRouter, затем (при отсутствии ключа) AITunnel
 	if is_openrouter_ready:
+		# deepseek_reply сам попробует AITunnel как fallback, если настроен ключ/URL
 		return deepseek_reply(openrouter_key, system_prompt, history, user_text, aitunnel_key)
+	if is_aitunnel_ready:
+		return aitunnel_reply(aitunnel_key, system_prompt, history, user_text)
 	return "ИИ не настроен. Добавьте AITUNNEL_API_KEY/AITUNNEL_API_URL или DEEPSEEK_API_KEY в .env."
 
 
