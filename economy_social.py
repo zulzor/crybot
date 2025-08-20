@@ -308,11 +308,59 @@ class SocialManager:
         self.clans: Dict[int, Clan] = {}
         self.marriages: Dict[int, Marriage] = {}
         self.clan_counter = 1
+        self._storage = get_storage_from_env()
+        # попытка восстановить счетчик кланов из meta
+        meta = self._storage.get("meta", "clan_counter")
+        if meta and isinstance(meta.get("value"), int):
+            self.clan_counter = int(meta["value"])
     
     def get_profile(self, user_id: int) -> UserProfile:
-        if user_id not in self.profiles:
-            self.profiles[user_id] = UserProfile(user_id=user_id, name=f"Игрок {user_id}")
-        return self.profiles[user_id]
+        if user_id in self.profiles:
+            return self.profiles[user_id]
+        # пробуем из хранилища
+        data = self._storage.get("profiles", str(user_id))
+        if data:
+            p = UserProfile(
+                user_id=int(data.get("user_id", user_id)),
+                name=str(data.get("name", f"Игрок {user_id}")),
+                bio=str(data.get("bio", "")),
+                avatar=str(data.get("avatar", "👤")),
+                level=int(data.get("level", 1)),
+                experience=int(data.get("experience", 0)),
+                relationship_status=RelationshipStatus[data.get("relationship_status", "SINGLE")],
+                partner_id=(int(data["partner_id"]) if data.get("partner_id") is not None else None),
+                clan_id=(int(data["clan_id"]) if data.get("clan_id") is not None else None),
+                friends=set(int(x) for x in data.get("friends", [])),
+                followers=set(int(x) for x in data.get("followers", [])),
+                following=set(int(x) for x in data.get("following", [])),
+                created_at=float(data.get("created_at", time.time())),
+                last_online=float(data.get("last_online", time.time())),
+            )
+            self.profiles[user_id] = p
+            return p
+        p = UserProfile(user_id=user_id, name=f"Игрок {user_id}")
+        self.profiles[user_id] = p
+        # первичное сохранение
+        self._save_profile(p)
+        return p
+
+    def _save_profile(self, profile: UserProfile) -> None:
+        self._storage.set("profiles", str(profile.user_id), {
+            "user_id": profile.user_id,
+            "name": profile.name,
+            "bio": profile.bio,
+            "avatar": profile.avatar,
+            "level": profile.level,
+            "experience": profile.experience,
+            "relationship_status": profile.relationship_status.name,
+            "partner_id": profile.partner_id,
+            "clan_id": profile.clan_id,
+            "friends": list(profile.friends),
+            "followers": list(profile.followers),
+            "following": list(profile.following),
+            "created_at": profile.created_at,
+            "last_online": profile.last_online,
+        })
     
     def update_profile(self, user_id: int, **kwargs) -> str:
         profile = self.get_profile(user_id)
@@ -322,6 +370,7 @@ class SocialManager:
                 setattr(profile, key, value)
         
         profile.last_online = time.time()
+        self._save_profile(profile)
         return "✅ Профиль обновлён"
     
     def add_friend(self, user_id: int, friend_id: int) -> str:
@@ -336,7 +385,8 @@ class SocialManager:
         
         profile.friends.add(friend_id)
         friend_profile.followers.add(user_id)
-        
+        self._save_profile(profile)
+        self._save_profile(friend_profile)
         return f"✅ {friend_profile.name} добавлен в друзья"
     
     def remove_friend(self, user_id: int, friend_id: int) -> str:
@@ -348,7 +398,8 @@ class SocialManager:
         
         profile.friends.discard(friend_id)
         friend_profile.followers.discard(user_id)
-        
+        self._save_profile(profile)
+        self._save_profile(friend_profile)
         return f"❌ {friend_profile.name} удалён из друзей"
     
     def create_clan(self, user_id: int, name: str, description: str) -> str:
@@ -375,6 +426,22 @@ class SocialManager:
         
         self.clans[clan_id] = clan
         profile.clan_id = clan_id
+        # сохраняем
+        self._save_profile(profile)
+        self._storage.set("clans", str(clan_id), {
+            "id": clan_id,
+            "name": clan.name,
+            "description": clan.description,
+            "leader_id": clan.leader_id,
+            "members": list(clan.members),
+            "level": clan.level,
+            "experience": clan.experience,
+            "treasury": clan.treasury,
+            "created_at": clan.created_at,
+            "is_public": clan.is_public,
+        })
+        self.clan_counter += 1
+        self._storage.set("meta", "clan_counter", {"value": self.clan_counter})
         
         return (
             f"🏰 Клан '{name}' создан!\n"
@@ -397,7 +464,19 @@ class SocialManager:
         
         clan.members.add(user_id)
         profile.clan_id = clan_id
-        
+        self._save_profile(profile)
+        self._storage.set("clans", str(clan_id), {
+            "id": clan.id,
+            "name": clan.name,
+            "description": clan.description,
+            "leader_id": clan.leader_id,
+            "members": list(clan.members),
+            "level": clan.level,
+            "experience": clan.experience,
+            "treasury": clan.treasury,
+            "created_at": clan.created_at,
+            "is_public": clan.is_public,
+        })
         return f"✅ Вы вступили в клан '{clan.name}'"
     
     def leave_clan(self, user_id: int) -> str:
@@ -413,7 +492,19 @@ class SocialManager:
         
         clan.members.discard(user_id)
         profile.clan_id = None
-        
+        self._save_profile(profile)
+        self._storage.set("clans", str(clan.id), {
+            "id": clan.id,
+            "name": clan.name,
+            "description": clan.description,
+            "leader_id": clan.leader_id,
+            "members": list(clan.members),
+            "level": clan.level,
+            "experience": clan.experience,
+            "treasury": clan.treasury,
+            "created_at": clan.created_at,
+            "is_public": clan.is_public,
+        })
         return f"✅ Вы покинули клан '{clan.name}'"
     
     def propose_marriage(self, user_id: int, partner_id: int) -> str:
@@ -445,6 +536,16 @@ class SocialManager:
         profile.partner_id = partner_id
         partner_profile.relationship_status = RelationshipStatus.MARRIED
         partner_profile.partner_id = user_id
+        self._save_profile(profile)
+        self._save_profile(partner_profile)
+        self._storage.set("marriages", str(marriage_id), {
+            "id": marriage.id,
+            "partner1_id": marriage.partner1_id,
+            "partner2_id": marriage.partner2_id,
+            "married_at": marriage.married_at,
+            "is_active": marriage.is_active,
+            "divorce_requested_by": marriage.divorce_requested_by,
+        })
         
         return (
             f"💍 Поздравляем с браком!\n"
@@ -485,6 +586,16 @@ class SocialManager:
         partner1.partner_id = None
         partner2.relationship_status = RelationshipStatus.DIVORCED
         partner2.partner_id = None
+        self._save_profile(partner1)
+        self._save_profile(partner2)
+        self._storage.set("marriages", str(marriage.id), {
+            "id": marriage.id,
+            "partner1_id": marriage.partner1_id,
+            "partner2_id": marriage.partner2_id,
+            "married_at": marriage.married_at,
+            "is_active": marriage.is_active,
+            "divorce_requested_by": marriage.divorce_requested_by,
+        })
         
         return "💔 Развод оформлен"
 

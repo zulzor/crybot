@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 import time
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+import os
 
 
 # -------- Типы --------
@@ -111,6 +112,35 @@ def _build_inline_keyboard(button_rows: List[List[Tuple[str, Dict]]]) -> str:
     return kb.get_keyboard()
 
 
+# ---------- Админка: inline меню ----------
+
+
+def _build_admin_main_inline_keyboard() -> str:
+    rows = [
+        [("⚙️ Хранилище", {"action": "admin_storage"}), ("🌐 Язык", {"action": "admin_lang"})],
+        [("📈 Мониторинг", {"action": "admin_monitoring"}), ("🛒 Экономика", {"action": "admin_economy"})],
+        [("💾 Бэкапы", {"action": "admin_backups"})],
+    ]
+    return _build_inline_keyboard(rows)
+
+
+def _build_storage_inline_keyboard() -> str:
+    rows = [
+        [("SQLite", {"action": "set_storage", "value": "sqlite"}), ("JSON", {"action": "set_storage", "value": "json"})],
+        [("Hybrid", {"action": "set_storage", "value": "hybrid"})],
+        [("⬅️ Назад", {"action": "admin_menu"})],
+    ]
+    return _build_inline_keyboard(rows)
+
+
+def _build_lang_inline_keyboard() -> str:
+    rows = [
+        [("Русский", {"action": "set_lang", "value": "ru"}), ("English", {"action": "set_lang", "value": "en"})],
+        [("⬅️ Назад", {"action": "admin_menu"})],
+    ]
+    return _build_inline_keyboard(rows)
+
+
 def _build_conductor_inline_keyboard() -> str:
     rows = [
         [("Проверить билеты", {"action": "conductor_action", "value": "проверить билеты"}),
@@ -213,6 +243,34 @@ def dispatch_command(
         return False, None
 
     ctx = RouterContext(vk=vk, peer_id=peer_id, user_id=user_id, text=raw, is_dm=is_dm)
+
+    # Админские inline действия
+    if lower == "admin_menu" and _is_admin_check(user_id):
+        _send_with_keyboard(ctx, "Админ‑меню:", _build_admin_main_inline_keyboard())
+        return True, None
+    if lower == "admin_storage" and _is_admin_check(user_id):
+        _send_with_keyboard(ctx, "Выберите бэкенд хранилища:", _build_storage_inline_keyboard())
+        return True, None
+    if lower == "admin_lang" and _is_admin_check(user_id):
+        _send_with_keyboard(ctx, "Выберите язык интерфейса:", _build_lang_inline_keyboard())
+        return True, None
+    if lower.startswith("set_storage") and _is_admin_check(user_id):
+        # Простейшая реализация: меняем переменную окружения процесса (для примера), в реальном окружении — перезапуск
+        parts = raw.split()
+        value = parts[-1].strip().lower() if len(parts) > 1 else "sqlite"
+        if value not in {"sqlite", "json", "hybrid"}:
+            return True, "❌ Недопустимое значение: sqlite|json|hybrid"
+        os.environ["STORAGE_BACKEND"] = value
+        _send_with_keyboard(ctx, f"✅ STORAGE_BACKEND={value}. Изменение вступит в силу после перезапуска.", _build_storage_inline_keyboard())
+        return True, None
+    if lower.startswith("set_lang") and _is_admin_check(user_id):
+        parts = raw.split()
+        value = parts[-1].strip().lower() if len(parts) > 1 else "ru"
+        if value not in {"ru", "en"}:
+            return True, "❌ Язык поддерживается: ru|en"
+        os.environ["DEFAULT_LANGUAGE"] = "ru" if value == "ru" else "en"
+        _send_with_keyboard(ctx, f"✅ Язык интерфейса: {value}.", _build_lang_inline_keyboard())
+        return True, None
 
     # Контекст/права
     if cmd.dm_only and not is_dm:
