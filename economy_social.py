@@ -276,6 +276,7 @@ class UserProfile:
     following: Set[int] = field(default_factory=set)
     created_at: float = field(default_factory=time.time)
     last_online: float = field(default_factory=time.time)
+    preferred_language: str = "ru"
 
 
 @dataclass

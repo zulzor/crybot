@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import time
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import os
+from i18n import t
 
 
 # -------- Типы --------
@@ -246,13 +247,13 @@ def dispatch_command(
 
     # Админские inline действия
     if lower == "admin_menu" and _is_admin_check(user_id):
-        _send_with_keyboard(ctx, "Админ‑меню:", _build_admin_main_inline_keyboard())
+        _send_with_keyboard(ctx, t(user_id, "admin_menu"), _build_admin_main_inline_keyboard())
         return True, None
     if lower == "admin_storage" and _is_admin_check(user_id):
-        _send_with_keyboard(ctx, "Выберите бэкенд хранилища:", _build_storage_inline_keyboard())
+        _send_with_keyboard(ctx, t(user_id, "select_storage"), _build_storage_inline_keyboard())
         return True, None
     if lower == "admin_lang" and _is_admin_check(user_id):
-        _send_with_keyboard(ctx, "Выберите язык интерфейса:", _build_lang_inline_keyboard())
+        _send_with_keyboard(ctx, t(user_id, "select_lang"), _build_lang_inline_keyboard())
         return True, None
     if lower.startswith("set_storage") and _is_admin_check(user_id):
         # Простейшая реализация: меняем переменную окружения процесса (для примера), в реальном окружении — перезапуск
@@ -269,8 +270,27 @@ def dispatch_command(
         if value not in {"ru", "en"}:
             return True, "❌ Язык поддерживается: ru|en"
         os.environ["DEFAULT_LANGUAGE"] = "ru" if value == "ru" else "en"
-        _send_with_keyboard(ctx, f"✅ Язык интерфейса: {value}.", _build_lang_inline_keyboard())
+        _send_with_keyboard(ctx, t(user_id, "lang_set", lang=value), _build_lang_inline_keyboard())
         return True, None
+
+    # Язык для любого пользователя: /lang
+    if lower in {"/lang", "lang", "язык"}:
+        _send_with_keyboard(ctx, t(user_id, "select_lang"), _build_lang_inline_keyboard())
+        return True, None
+    if lower.startswith("set_lang "):
+        value = raw.split(" ", 1)[1].strip().lower()
+        if value not in {"ru", "en"}:
+            return True, "❌ ru|en"
+        # сохранить в профиль
+        try:
+            from economy_social import social_manager
+            profile = social_manager.get_profile(user_id)
+            profile.preferred_language = value
+            social_manager.update_profile(user_id, preferred_language=value)
+            _send_with_keyboard(ctx, t(user_id, "lang_set", lang=value), _build_lang_inline_keyboard())
+            return True, None
+        except Exception:
+            return True, "❌ Не удалось сохранить язык"
 
     # Контекст/права
     if cmd.dm_only and not is_dm:
