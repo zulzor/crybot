@@ -3156,6 +3156,19 @@ def main() -> None:
 				logging.getLogger("vk-mafia-bot").info(f"Admin payload: admin_ai_models from user={user_id} peer={peer_id}")
 				send_message(vk, peer_id, "Выберите ИИ модель:", keyboard=build_ai_models_keyboard())
 			continue
+		if action == "admin_ai_settings":
+			if user_id in ADMIN_USER_IDS:
+				msg = (
+					f"AI настройки:\n"
+					f"Temp={RUNTIME_TEMPERATURE}, TopP={RUNTIME_TOP_P}\n"
+					f"OR maxTok={RUNTIME_MAX_TOKENS_OR}, AT maxTok={RUNTIME_MAX_TOKENS_AT}\n"
+					f"Reason={RUNTIME_REASONING_ENABLED} tok={RUNTIME_REASONING_TOKENS} depth={RUNTIME_REASONING_DEPTH}\n"
+					f"History={RUNTIME_MAX_HISTORY}, MaxChars={RUNTIME_MAX_AI_CHARS}\n"
+					f"Retries OR/AT={RUNTIME_OR_RETRIES}/{RUNTIME_AT_RETRIES} Timeout OR/AT={RUNTIME_OR_TIMEOUT}/{RUNTIME_AT_TIMEOUT}\n"
+					f"OR→AT fallback={RUNTIME_OR_TO_AT_FALLBACK}"
+				)
+				send_message(vk, peer_id, msg, keyboard=build_ai_settings_keyboard())
+			continue
 		if action == "admin_users":
 			if user_id in ADMIN_USER_IDS:
 				send_message(vk, peer_id, "Управление пользователями:", keyboard=build_users_management_keyboard())
