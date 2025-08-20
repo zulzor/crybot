@@ -2466,6 +2466,7 @@ def handle_admin_panel(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_set_model(vk, peer_id: int, user_id: int, model_name: str) -> None:
+	global RUNTIME_AITUNNEL_MODEL, RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL
 	if user_id not in ADMIN_USER_IDS:
 		return
 	model = (model_name or "").strip()
@@ -2524,6 +2525,7 @@ def handle_admin_ai_settings(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_set_temperature(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_TEMPERATURE
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2539,6 +2541,7 @@ def handle_admin_set_temperature(vk, peer_id: int, user_id: int, value: str) -> 
 
 
 def handle_admin_set_top_p(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_TOP_P
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2554,6 +2557,7 @@ def handle_admin_set_top_p(vk, peer_id: int, user_id: int, value: str) -> None:
 
 
 def handle_admin_set_max_tokens(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
+	global RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2575,6 +2579,7 @@ def handle_admin_set_max_tokens(vk, peer_id: int, user_id: int, provider: str, v
 
 
 def handle_admin_set_max_chars(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_MAX_AI_CHARS
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2590,6 +2595,7 @@ def handle_admin_set_max_chars(vk, peer_id: int, user_id: int, value: str) -> No
 
 
 def handle_admin_set_history(vk, peer_id: int, user_id: int, value: str) -> None:
+	global RUNTIME_MAX_HISTORY
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2605,6 +2611,7 @@ def handle_admin_set_history(vk, peer_id: int, user_id: int, value: str) -> None
 
 
 def handle_admin_set_timeout(vk, peer_id: int, user_id: int, provider: str, value: str) -> None:
+	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2626,6 +2633,7 @@ def handle_admin_set_timeout(vk, peer_id: int, user_id: int, provider: str, valu
 
 
 def handle_admin_toggle_reasoning(vk, peer_id: int, user_id: int) -> None:
+	global RUNTIME_REASONING_ENABLED
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2635,6 +2643,7 @@ def handle_admin_toggle_reasoning(vk, peer_id: int, user_id: int) -> None:
 
 
 def handle_admin_toggle_fallback(vk, peer_id: int, user_id: int) -> None:
+	global RUNTIME_OR_TO_AT_FALLBACK
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2645,6 +2654,10 @@ def handle_admin_toggle_fallback(vk, peer_id: int, user_id: int) -> None:
 
 def handle_admin_reset_ai_settings(vk, peer_id: int, user_id: int) -> None:
 	"""Сброс всех AI настроек к значениям по умолчанию"""
+	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+	global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
+	global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
+	global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
 	if user_id not in ADMIN_USER_IDS:
 		return
 	
@@ -2705,6 +2718,11 @@ def handle_admin_import_ai_settings(vk, peer_id: int, user_id: int, settings_jso
 		settings = json.loads(settings_json)
 		
 		# Обновляем только существующие параметры
+		global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+		global RUNTIME_REASONING_ENABLED, RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH
+		global RUNTIME_MAX_HISTORY, RUNTIME_MAX_AI_CHARS, RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES
+		global RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT, RUNTIME_OR_TO_AT_FALLBACK
+		global RUNTIME_AI_PROVIDER, RUNTIME_OPENROUTER_MODEL, RUNTIME_AITUNNEL_MODEL
 		
 		if "temperature" in settings:
 			RUNTIME_TEMPERATURE = float(settings["temperature"])
