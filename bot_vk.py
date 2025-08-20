@@ -20,6 +20,9 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
+# Конфигурация и бэкапы
+import config
+
 # Flask для webhook сервера
 try:
 	from flask import Flask, request, jsonify
@@ -3360,6 +3363,23 @@ def main() -> None:
 			continue
 		if is_dm and text in {"/ai_current", "ai_current", "ai текущий"} and user_id in ADMIN_USER_IDS:
 			handle_admin_current(vk, peer_id, user_id)
+			continue
+		# Config: backup/list/restore (только ЛС и только админам)
+		if is_dm and user_id in ADMIN_USER_IDS and text.strip().lower() in {"/config backup", "config backup"}:
+			from admin import handle_admin_config_backup
+			handle_admin_config_backup(vk, peer_id, user_id)
+			continue
+		if is_dm and user_id in ADMIN_USER_IDS and text.strip().lower() in {"/config list", "config list"}:
+			from admin import handle_admin_config_list
+			handle_admin_config_list(vk, peer_id, user_id)
+			continue
+		if is_dm and user_id in ADMIN_USER_IDS and text.strip().lower().startswith("/config restore "):
+			from admin import handle_admin_config_restore
+			try:
+				idx_str = text.strip().split(" ", 2)[2]
+			except Exception:
+				idx_str = ""
+			handle_admin_config_restore(vk, peer_id, user_id, idx_str)
 			continue
 		if is_dm and text.startswith("/ai_provider ") and user_id in ADMIN_USER_IDS:
 			provider = text.split(" ", 1)[1].strip().upper()

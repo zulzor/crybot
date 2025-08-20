@@ -11,6 +11,13 @@ import vk_api
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from ai import runtime_settings, export_ai_settings, import_ai_settings, reset_ai_settings
+from config import (
+    export_config,
+    import_config,
+    backup_config_file,
+    list_config_backups,
+    restore_config_from_backup,
+)
 
 # ---------- Система ролей ----------
 class UserRole(Enum):
@@ -380,6 +387,44 @@ def handle_admin_apply_preset(vk, peer_id: int, user_id: int, preset_name: str) 
         text = f"❌ Пресет '{preset_name}' не найден."
     
     send_message(vk, peer_id, text, keyboard=build_presets_keyboard())
+
+# ---------- Конфигурация бота: бэкап/лист/восстановление ----------
+def handle_admin_config_backup(vk, peer_id: int, user_id: int) -> None:
+    """Создает резервную копию config.json"""
+    path = backup_config_file()
+    if path:
+        text = f"✅ Бэкап конфигурации создан: {path}"
+    else:
+        text = "❌ Не удалось создать бэкап (возможно, config.json отсутствует)."
+    send_message(vk, peer_id, text)
+
+def handle_admin_config_list(vk, peer_id: int, user_id: int) -> None:
+    """Показывает список доступных бэкапов"""
+    backups = list_config_backups()
+    if not backups:
+        text = "ℹ️ Бэкапы не найдены."
+    else:
+        lines = "\n".join(f"{idx+1}. {p}" for idx, p in enumerate(backups))
+        text = f"📚 Доступные бэкапы:\n\n{lines}\n\nВосстановление: /config restore <номер>"
+    send_message(vk, peer_id, text)
+
+def handle_admin_config_restore(vk, peer_id: int, user_id: int, idx_str: str) -> None:
+    """Восстанавливает конфигурацию из бэкапа по индексу из списка"""
+    try:
+        idx = int(idx_str) - 1
+    except Exception:
+        send_message(vk, peer_id, "❌ Использование: /config restore <номер> (см. /config list)")
+        return
+    backups = list_config_backups()
+    if idx < 0 or idx >= len(backups):
+        send_message(vk, peer_id, "❌ Неверный номер бэкапа")
+        return
+    ok = restore_config_from_backup(backups[idx])
+    if ok:
+        text = f"✅ Конфигурация восстановлена из: {backups[idx]}"
+    else:
+        text = "❌ Не удалось восстановить конфигурацию"
+    send_message(vk, peer_id, text)
 
 # ---------- Вспомогательные функции ----------
 def send_message(vk, peer_id: int, text: str, keyboard: Optional[Dict] = None) -> None:
