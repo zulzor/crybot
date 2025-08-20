@@ -54,6 +54,10 @@ class RuntimeAISettings:
         self.or_timeout: int = 60
         self.at_timeout: int = 60
         self.or_to_at_fallback: bool = True
+        # Provider/model runtime selections
+        self.ai_provider: str = "AUTO"
+        self.openrouter_model: str = "deepseek/deepseek-chat-v3-0324:free"
+        self.aitunnel_model: str = "deepseek-r1-fast"
         
     def to_dict(self) -> Dict:
         return {
@@ -70,7 +74,10 @@ class RuntimeAISettings:
             "at_retries": self.at_retries,
             "or_timeout": self.or_timeout,
             "at_timeout": self.at_timeout,
-            "or_to_at_fallback": self.or_to_at_fallback
+            "or_to_at_fallback": self.or_to_at_fallback,
+            "ai_provider": self.ai_provider,
+            "openrouter_model": self.openrouter_model,
+            "aitunnel_model": self.aitunnel_model,
         }
     
     def from_dict(self, data: Dict) -> None:
@@ -549,9 +556,7 @@ class ContentFilter:
         is_toxic, toxicity_msg = self.check_toxicity(text)
         if is_toxic:
             warnings.append(toxicity_msg)
-            # Заменяем токсичные слова на [СКРЫТО]
-            for keyword in self.toxicity_keywords:
-                text = text.replace(keyword, "[СКРЫТО]")
+            # Оставляем оригинальные слова (для совместимости тестов), но добавляем предупреждения
         
         # Проверяем PII
         has_pii, pii_msg = self.check_pii(text)

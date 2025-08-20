@@ -116,6 +116,9 @@ class IndicatorManager:
             
             if custom_message:
                 indicator.message = custom_message
+            else:
+                # Если пользовательское сообщение не передано, используем дефолтное для нового типа
+                indicator.message = DEFAULT_INDICATORS[indicator_type].message
             
             # Обновляем эмодзи
             indicator.emoji = DEFAULT_INDICATORS[indicator_type].emoji

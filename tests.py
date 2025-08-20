@@ -553,14 +553,14 @@ class TestConfigModule(unittest.TestCase):
     
     def test_bot_config_defaults(self):
         """Тест значений по умолчанию конфигурации"""
-        config = config.BotConfig()
-        self.assertEqual(config.bot_name, "CryCat Bot")
-        self.assertEqual(config.bot_version, "2.0.0")
-        self.assertEqual(config.ai_provider, "AUTO")
-        self.assertEqual(config.runtime_temperature, 0.6)
-        self.assertEqual(config.runtime_max_tokens_or, 80)
-        self.assertTrue(config.games_enabled)
-        self.assertTrue(config.monitoring_enabled)
+        cfg = config.BotConfig()
+        self.assertEqual(cfg.bot_name, "CryCat Bot")
+        self.assertEqual(cfg.bot_version, "2.0.0")
+        self.assertEqual(cfg.ai_provider, "AUTO")
+        self.assertEqual(cfg.runtime_temperature, 0.6)
+        self.assertEqual(cfg.runtime_max_tokens_or, 80)
+        self.assertTrue(cfg.games_enabled)
+        self.assertTrue(cfg.monitoring_enabled)
     
     def test_config_to_dict(self):
         """Тест конвертации конфигурации в словарь"""
