@@ -3042,6 +3042,11 @@ def add_history(peer_id: int, role: str, content: str) -> None:
 # ---------- Основной цикл ----------
 def main() -> None:
 	# Объявляем все глобальные переменные в начале функции
+	global RUNTIME_TEMPERATURE, RUNTIME_TOP_P, RUNTIME_MAX_TOKENS_OR, RUNTIME_MAX_TOKENS_AT
+	global RUNTIME_MAX_AI_CHARS, RUNTIME_MAX_HISTORY, RUNTIME_REASONING_ENABLED
+	global RUNTIME_REASONING_TOKENS, RUNTIME_REASONING_DEPTH, RUNTIME_AI_PROVIDER
+	global RUNTIME_OR_RETRIES, RUNTIME_AT_RETRIES, RUNTIME_OR_TIMEOUT, RUNTIME_AT_TIMEOUT
+	global RUNTIME_OR_TO_AT_FALLBACK, RUNTIME_OPENROUTER_MODEL, RUNTIME_AITUNNEL_MODEL
 	
 	configure_logging()
 	load_dotenv()
