@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 import time
+import time as _time
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import os
 from i18n import t
@@ -533,7 +534,7 @@ def dispatch_command(
     if cmd.admin_required and not _is_admin_check(user_id):
         return True, "❌ Недостаточно прав"
 
-    rl = _rate_limited(user_id, peer_id, time.time())
+    rl = _rate_limited(user_id, peer_id, _time.time())
     if rl:
         return True, rl
 
