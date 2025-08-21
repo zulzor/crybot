@@ -16,6 +16,7 @@ from enum import Enum
 from datetime import datetime
 
 from dotenv import load_dotenv
+from version import get_version, get_build
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
@@ -42,9 +43,8 @@ except ImportError:
 
 
 # ---------- Версия бота ----------
-BOT_VERSION = "2.0.0"  # Синхронизировано с pyproject.toml/README
-BOT_BUILD = "2025-08-20-001"  # Дата-время-порядковый номер
-
+BOT_VERSION = get_version()
+BOT_BUILD = get_build()
 # ---------- Система ролей и привилегий ----------
 class UserRole(Enum):
 	USER = "user"
@@ -2018,7 +2018,7 @@ def build_empty_keyboard() -> str:
 def send_message(vk, peer_id: int, text: str, keyboard: Optional[str] = None) -> None:
 	params: dict[str, object] = {
 		"peer_id": peer_id,
-		"random_id": 0,
+		"random_id": int(time.time()*1000) ^ random.getrandbits(31),
 		"message": text,
 	}
 	if keyboard is not None:
