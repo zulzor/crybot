@@ -1666,6 +1666,7 @@ SQUID_GAMES: Dict[int, SquidGameSession] = {}
 
 # ---------- Клавиатуры ----------
 def build_main_keyboard() -> str:
+	"""Совместимость: теперь это раздел "Игры" (подменю секций)."""
 	keyboard = VkKeyboard(one_time=False, inline=False)
 	keyboard.add_button("🎭 Мафия", color=VkKeyboardColor.PRIMARY, payload={"action": "start_mafia"})
 	keyboard.add_button("🔢 Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
@@ -1673,18 +1674,12 @@ def build_main_keyboard() -> str:
 	keyboard.add_button("❓ Викторина", color=VkKeyboardColor.SECONDARY, payload={"action": "start_quiz"})
 	keyboard.add_button("🦑 Кальмар", color=VkKeyboardColor.PRIMARY, payload={"action": "start_squid"})
 	keyboard.add_line()
-	keyboard.add_button("🏢 Космический Бизнес", color=VkKeyboardColor.POSITIVE, payload={"action": "start_business"})
-	keyboard.add_line()
 	keyboard.add_button("🚂 Проводница РЖД", color=VkKeyboardColor.PRIMARY, payload={"action": "start_conductor"})
 	keyboard.add_button("🎯 Виселица", color=VkKeyboardColor.SECONDARY, payload={"action": "start_hangman"})
 	keyboard.add_line()
 	keyboard.add_button("🃏 Покер", color=VkKeyboardColor.POSITIVE, payload={"action": "start_poker"})
-	keyboard.add_button("💰 Экономика", color=VkKeyboardColor.PRIMARY, payload={"action": "show_economy"})
 	keyboard.add_line()
-	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
-	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
-	keyboard.add_line()
-	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	keyboard.add_button("← Назад", color=VkKeyboardColor.SECONDARY, payload={"action": "back_to_sections"})
 	return keyboard.get_keyboard()
 
 
@@ -3805,8 +3800,8 @@ def main() -> None:
 			if reply:
 				send_message(vk, peer_id, reply)
 			continue
-		if action == "back_to_main":
-			send_message(vk, peer_id, "Главное меню:", keyboard=build_main_keyboard())
+		if action == "back_to_main" or action == "back_to_sections":
+			send_message(vk, peer_id, "Главное меню:", keyboard=build_sections_keyboard(peer_id < 2000000000))
 			continue
 
 		# Админ-панель: основные разделы
