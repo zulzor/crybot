@@ -761,3 +761,81 @@ class GameEngine:
 
 # Глобальный экземпляр движка игр
 game_engine = GameEngine()
+
+
+# ---- Backward compatibility adapters for legacy imports ----
+class _ConductorGameAdapter:
+    def __init__(self):
+        self._peer_to_user: Dict[int, int] = {}
+
+    def start_session(self, peer_id: int, user_id: int) -> str:
+        self._peer_to_user[peer_id] = user_id
+        msg, _ = game_engine.start_game(user_id, peer_id, "conductor")
+        return msg
+
+    def handle_action(self, peer_id: int, action: str) -> str:
+        user_id = self._peer_to_user.get(peer_id, peer_id)
+        mapping = {
+            "проверить билеты": "check_tickets",
+            "проверка билетов": "check_tickets",
+            "помочь пассажирам": "help_passengers",
+            "решить проблемы": "solve_problems",
+            "следующий поезд": "next_train",
+            "завершить смену": "end_shift",
+            "продолжить": "continue",
+        }
+        cmd = mapping.get(action.strip().lower(), action.strip().lower())
+        msg, _ = game_engine.handle_action(user_id, peer_id, "conductor", cmd)
+        return msg
+
+
+class _HangmanManagerAdapter:
+    def __init__(self):
+        self._peer_to_user: Dict[int, int] = {}
+
+    def start_game(self, peer_id: int) -> str:
+        # если неизвестно кто инициировал — используем peer_id как user_id
+        user_id = self._peer_to_user.get(peer_id, peer_id)
+        self._peer_to_user[peer_id] = user_id
+        msg, _ = game_engine.start_game(user_id, peer_id, "hangman")
+        # сразу запускаем игру
+        msg, _ = game_engine.handle_action(user_id, peer_id, "hangman", "start_game")
+        return msg
+
+    def guess_letter(self, peer_id: int, letter: str) -> str:
+        user_id = self._peer_to_user.get(peer_id, peer_id)
+        # В новом движке ввод буквы обрабатывается отдельным каналом; здесь просто возвращаем статус
+        # Чтобы не ломать старый интерфейс, оставим заглушку перехода туда-обратно
+        msg, _ = game_engine.handle_action(user_id, peer_id, "hangman", "continue")
+        return msg
+
+
+class _PokerGameManagerAdapter:
+    def __init__(self):
+        self._peer_to_owner: Dict[int, int] = {}
+
+    def create_game(self, peer_id: int, creator_id: int, creator_name: str) -> str:
+        self._peer_to_owner[peer_id] = creator_id
+        msg, _ = game_engine.start_game(creator_id, peer_id, "poker")
+        # создаём стол
+        msg, _ = game_engine.handle_action(creator_id, peer_id, "poker", "create_table")
+        return msg
+
+    def join_game(self, peer_id: int, user_id: int, name: str) -> str:
+        # если нет сессии — создадим
+        msg, _ = game_engine.start_game(user_id, peer_id, "poker")
+        # присоединяем к столу (шаблонно — стол #1)
+        msg, _ = game_engine.handle_action(user_id, peer_id, "poker", "join_1")
+        return msg
+
+    # Дополнительно оставляем старт — совместимость
+    def start_game(self, peer_id: int) -> str:
+        owner_id = self._peer_to_owner.get(peer_id, peer_id)
+        msg, _ = game_engine.handle_action(owner_id, peer_id, "poker", "start_game")
+        return msg
+
+
+# Legacy names expected by older modules
+conductor_game = _ConductorGameAdapter()
+hangman_manager = _HangmanManagerAdapter()
+poker_manager = _PokerGameManagerAdapter()
