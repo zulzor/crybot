@@ -6,6 +6,7 @@ import time
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import os
 from i18n import t
+from version import get_version
 
 
 # -------- Типы --------
@@ -1595,9 +1596,12 @@ _register_builtin_commands()
 
 def _handle_start(ctx: RouterContext) -> Optional[str]:
     """Главное меню бота"""
-    message = """🎮 **CryBot** — игровой бот для ВКонтакте
+    ver = get_version()
+    message = f"""🎮 **CryBot** — игровой бот для ВКонтакте
 
 Привет! Я бот с играми и ИИ-чатом. Чем займёмся?
+
+Версия: `{ver}`
 
 Выбери режим:"""
 
