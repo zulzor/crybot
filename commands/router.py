@@ -1608,6 +1608,8 @@ def _handle_start(ctx: RouterContext) -> Optional[str]:
     keyboard = VkKeyboard(inline=True)
     keyboard.add_button("🎮 Игры", color=VkKeyboardColor.PRIMARY)
     keyboard.add_button("🤖 ИИ-чат", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🌐 Язык", color=VkKeyboardColor.SECONDARY)
 
     _send_with_keyboard(ctx, message, keyboard.get_keyboard())
     return None
