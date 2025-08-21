@@ -103,7 +103,7 @@ ADMIN_USER_IDS: Set[int] = _parse_admin_ids(os.getenv("ADMIN_USER_IDS", "").stri
 def _is_admin(uid: int) -> bool:
     return uid in ADMIN_USER_IDS
 
-configure_router(is_admin=_is_admin)
+configure_router()
 
 # Текущее имя модели AITunnel (может быть изменено админом в рантайме)
 RUNTIME_AITUNNEL_MODEL: str = AITUNNEL_MODEL
