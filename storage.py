@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -180,4 +181,37 @@ def get_storage_from_env() -> BaseKVStorage:
         return HybridStorage(primary, shadow, hybrid_export, import_on_first_run)
     # default sqlite
     return SQLiteKVStorage(db_path)
+
+def update_user_activity(user_id: int) -> None:
+    """Обновляет время последней активности пользователя"""
+    try:
+        storage = get_storage_from_env()
+        profile = storage.get("profiles", str(user_id)) or {}
+        
+        if isinstance(profile, dict):
+            profile["last_activity"] = time.time()
+            profile["user_id"] = user_id
+            storage.set("profiles", str(user_id), profile)
+    except Exception:
+        # Игнорируем ошибки обновления активности
+        pass
+
+def get_user_profile(user_id: int) -> Optional[Dict[str, Any]]:
+    """Получает профиль пользователя"""
+    try:
+        storage = get_storage_from_env()
+        return storage.get("profiles", str(user_id))
+    except Exception:
+        return None
+
+def set_user_profile(user_id: int, profile_data: Dict[str, Any]) -> None:
+    """Устанавливает профиль пользователя"""
+    try:
+        storage = get_storage_from_env()
+        profile_data["last_activity"] = time.time()
+        profile_data["user_id"] = user_id
+        storage.set("profiles", str(user_id), profile_data)
+    except Exception:
+        # Игнорируем ошибки сохранения профиля
+        pass
 

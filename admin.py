@@ -463,7 +463,13 @@ def is_admin(user_id: int, admin_ids: set) -> bool:
 
 def get_user_role(user_id: int) -> UserRole:
     """Получает роль пользователя"""
-    # TODO: Реализовать систему ролей
+    # Проверяем админов из переменных окружения
+    from bot_vk import ADMIN_USER_IDS
+    if user_id in ADMIN_USER_IDS:
+        return UserRole.SUPER_ADMIN
+    
+    # TODO: В будущем можно добавить загрузку ролей из БД
+    # Пока возвращаем USER для всех остальных
     return UserRole.USER
 
 def create_user_profile(user_id: int) -> UserProfile:
@@ -480,3 +486,36 @@ def create_chat_settings(chat_id: int) -> ChatSettings:
         chat_id=chat_id,
         created_at=time.time()
     )
+
+def has_privilege(user_id: int, privilege: str) -> bool:
+    """Проверяет, есть ли у пользователя привилегия"""
+    from bot_vk import ROLE_PRIVILEGES, UserRole
+    role = get_user_role(user_id)
+    
+    if role == UserRole.SUPER_ADMIN:
+        return True
+    
+    privileges = ROLE_PRIVILEGES.get(role, set())
+    return privilege in privileges or "*" in privileges
+
+def can_manage_roles(user_id: int) -> bool:
+    """Проверяет, может ли пользователь управлять ролями"""
+    return has_privilege(user_id, "manage_roles")
+
+def can_moderate_chat(user_id: int) -> bool:
+    """Проверяет, может ли пользователь модерировать чат"""
+    return has_privilege(user_id, "warn_users") or has_privilege(user_id, "delete_messages")
+
+def can_control_ai(user_id: int) -> bool:
+    """Проверяет, может ли пользователь управлять ИИ"""
+    return has_privilege(user_id, "ai_control")
+
+def get_user_privileges(user_id: int) -> set:
+    """Возвращает список привилегий пользователя"""
+    from bot_vk import ROLE_PRIVILEGES, UserRole
+    role = get_user_role(user_id)
+    
+    if role == UserRole.SUPER_ADMIN:
+        return {"*"}  # Все привилегии
+    
+    return ROLE_PRIVILEGES.get(role, set())

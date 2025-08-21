@@ -263,15 +263,73 @@ class HealthChecker:
         )
     
     def _check_database(self):
-        """Проверяет базу данных (заглушка)"""
-        # TODO: Реализовать проверку реальной БД
-        self.health_status["database"] = HealthStatus(
-            service="Database",
-            status="healthy",
-            message="База данных доступна",
-            timestamp=time.time(),
-            details={"type": "in-memory"}
-        )
+        """Проверяет базу данных"""
+        try:
+            from storage import get_storage_from_env
+            storage = get_storage_from_env()
+            
+            # Проверяем подключение к БД
+            if hasattr(storage, 'conn'):
+                # SQLite
+                cursor = storage.conn.cursor()
+                cursor.execute("SELECT 1")
+                result = cursor.fetchone()
+                if result and result[0] == 1:
+                    self.health_status["database"] = HealthStatus(
+                        service="Database",
+                        status="healthy",
+                        message="SQLite база данных доступна",
+                        timestamp=time.time(),
+                        details={"type": "sqlite", "path": getattr(storage, 'db_path', 'unknown')}
+                    )
+                else:
+                    self.health_status["database"] = HealthStatus(
+                        service="Database",
+                        status="unhealthy",
+                        message="SQLite база данных недоступна",
+                        timestamp=time.time(),
+                        details={"type": "sqlite", "error": "query_failed"}
+                    )
+            else:
+                # JSON storage
+                try:
+                    # Проверяем доступность файловой системы
+                    test_data = {"test": "health_check"}
+                    storage.set("health_check", "test", test_data)
+                    retrieved = storage.get("health_check", "test")
+                    if retrieved and retrieved.get("test") == "health_check":
+                        self.health_status["database"] = HealthStatus(
+                            service="Database",
+                            status="healthy",
+                            message="JSON хранилище доступно",
+                            timestamp=time.time(),
+                            details={"type": "json", "path": getattr(storage, 'data_dir', 'unknown')}
+                        )
+                    else:
+                        self.health_status["database"] = HealthStatus(
+                            service="Database",
+                            status="unhealthy",
+                            message="JSON хранилище недоступно",
+                            timestamp=time.time(),
+                            details={"type": "json", "error": "read_write_failed"}
+                        )
+                except Exception as e:
+                    self.health_status["database"] = HealthStatus(
+                        service="Database",
+                        status="unhealthy",
+                        message=f"JSON хранилище недоступно: {str(e)}",
+                        timestamp=time.time(),
+                        details={"type": "json", "error": str(e)}
+                    )
+                    
+        except Exception as e:
+            self.health_status["database"] = HealthStatus(
+                service="Database",
+                status="unhealthy",
+                message=f"Ошибка подключения к БД: {str(e)}",
+                timestamp=time.time(),
+                details={"error": str(e)}
+            )
     
     def get_overall_status(self) -> str:
         """Возвращает общий статус здоровья системы"""
@@ -286,6 +344,47 @@ class HealthChecker:
             return "degraded"
         else:
             return "healthy"
+    
+    def _calculate_cache_hit_rate(self) -> float:
+        """Вычисляет процент попаданий в кеш"""
+        try:
+            from cache_monitoring import cache_manager
+            if hasattr(cache_manager, 'get_stats'):
+                stats = cache_manager.get_stats()
+                hits = stats.get('hits', 0)
+                misses = stats.get('misses', 0)
+                total = hits + misses
+                if total > 0:
+                    return round((hits / total) * 100, 2)
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    def _get_active_users_count(self) -> int:
+        """Возвращает количество активных пользователей за последний час"""
+        try:
+            from storage import get_storage_from_env
+            storage = get_storage_from_env()
+            
+            # Получаем профили пользователей
+            profiles = storage.get_all("profiles")
+            if not profiles:
+                return 0
+            
+            # Считаем пользователей активных за последний час
+            current_time = time.time()
+            one_hour_ago = current_time - 3600
+            active_count = 0
+            
+            for user_id, profile in profiles.items():
+                if isinstance(profile, dict) and 'last_activity' in profile:
+                    last_activity = profile.get('last_activity', 0)
+                    if last_activity > one_hour_ago:
+                        active_count += 1
+            
+            return active_count
+        except Exception:
+            return 0
 
 # Глобальный health checker
 health_checker = HealthChecker()
@@ -445,8 +544,8 @@ def status_endpoint():
         "successful_requests": metrics_collector.get_counter("ai_success_total"),
         "failed_requests": metrics_collector.get_counter("ai_errors_total"),
         "average_response_time": metrics_collector.get_histogram_stats("ai_response_time").get("avg", 0.0),
-        "cache_hit_rate": 0.0,  # TODO: Реализовать
-        "active_users": 0,  # TODO: Реализовать
+        "cache_hit_rate": self._calculate_cache_hit_rate(),
+        "active_users": self._get_active_users_count(),
         "uptime_seconds": max(0.0, time.time() - START_TIME)
     }
     
