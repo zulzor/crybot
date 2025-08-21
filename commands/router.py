@@ -1590,8 +1590,7 @@ def _register_builtin_commands() -> None:
     )
 
 
-# Инициализация регистра при импорте модуля
-_register_builtin_commands()
+# Инициализация регистра будет выполнена в конце файла, после определения всех хендлеров
 
 
 def _handle_start(ctx: RouterContext) -> Optional[str]:
@@ -1715,6 +1714,10 @@ def _handle_ai_chat_entry(ctx: RouterContext) -> Optional[str]:
 - Чтобы очистить контекст — /reset"""
     _send_with_keyboard(ctx, message, None)
     return None
+
+
+# В самом конце: инициализация реестра команд после определения всех хендлеров
+_register_builtin_commands()
 
 def _handle_chess(ctx: RouterContext) -> Optional[str]:
     from games_extended import game_engine
