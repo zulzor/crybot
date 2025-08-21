@@ -213,6 +213,15 @@ class BotConfig:
 def load_config_from_env(config: BotConfig):
     """Загружает конфигурацию из переменных окружения"""
     
+    # Загружаем .env файл если он существует
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        print("Warning: python-dotenv not installed, .env file will not be loaded")
+    except Exception as e:
+        print(f"Warning: Could not load .env file: {e}")
+    
     # VK настройки
     if os.getenv("VK_GROUP_TOKEN"):
         config.vk_group_token = os.getenv("VK_GROUP_TOKEN")
@@ -227,8 +236,11 @@ def load_config_from_env(config: BotConfig):
     if os.getenv("AI_PROVIDER"):
         config.ai_provider = os.getenv("AI_PROVIDER")
     
+    # OpenRouter API key (может быть OPENROUTER_API_KEY или DEEPSEEK_API_KEY)
     if os.getenv("OPENROUTER_API_KEY"):
         config.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    elif os.getenv("DEEPSEEK_API_KEY"):
+        config.openrouter_api_key = os.getenv("DEEPSEEK_API_KEY")
     
     if os.getenv("AITUNNEL_API_KEY"):
         config.aitunnel_api_key = os.getenv("AITUNNEL_API_KEY")
