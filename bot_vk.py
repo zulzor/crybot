@@ -1690,16 +1690,29 @@ def build_main_keyboard() -> str:
 
 def build_dm_keyboard() -> str:
 	"""Клавиатура для личных сообщений: без Мафии и Кальмара."""
+	# В ЛС показываем секции (включая Админ)
+	return build_sections_keyboard(True)
+
+
+def build_sections_keyboard(is_dm: bool) -> str:
+	"""Главное меню секций: Экономика, Социальное, Игры, ИИ‑чат, Язык, Админ(только ЛС), Инструкция, Карта бота"""
 	keyboard = VkKeyboard(one_time=False, inline=False)
-	keyboard.add_button("🔢 Угадай число", color=VkKeyboardColor.SECONDARY, payload={"action": "start_guess"})
-	keyboard.add_button("❓ Викторина", color=VkKeyboardColor.PRIMARY, payload={"action": "start_quiz"})
+	# Ряд 1
+	keyboard.add_button("🛒 Экономика", color=VkKeyboardColor.PRIMARY, payload={"action": "show_economy"})
+	keyboard.add_button("👥 Социальное", color=VkKeyboardColor.SECONDARY, payload={"action": "show_social"})
 	keyboard.add_line()
-	keyboard.add_button("🏢 Космический Бизнес", color=VkKeyboardColor.POSITIVE, payload={"action": "start_business"})
+	# Ряд 2
+	keyboard.add_button("🎮 Игры", color=VkKeyboardColor.PRIMARY, payload={"action": "section_games"})
+	keyboard.add_button("🤖 ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
 	keyboard.add_line()
-	keyboard.add_button("ИИ‑чат", color=VkKeyboardColor.PRIMARY, payload={"action": "ai_on"})
-	keyboard.add_button("Выключить ИИ", color=VkKeyboardColor.NEGATIVE, payload={"action": "ai_off"})
+	# Ряд 3
+	keyboard.add_button("🌐 Язык", color=VkKeyboardColor.SECONDARY, payload={"action": "select_language"})
+	if is_dm:
+		keyboard.add_button("🔐 Админ", color=VkKeyboardColor.SECONDARY, payload={"action": "admin"})
 	keyboard.add_line()
-	keyboard.add_button("Описание", color=VkKeyboardColor.SECONDARY, payload={"action": "show_help"})
+	# Ряд 4
+	keyboard.add_button("📖 Инструкция", color=VkKeyboardColor.SECONDARY, payload={"action": "show_instruction"})
+	keyboard.add_button("🗺️ Карта бота", color=VkKeyboardColor.SECONDARY, payload={"action": "show_map"})
 	return keyboard.get_keyboard()
 
 def build_admin_keyboard() -> str:
@@ -3247,10 +3260,32 @@ def main() -> None:
 			continue
 
 		if text in {"/start", "start", "начать"}:
+			# Если пользователь не принял политику/согласие — показываем меню секций
+			privacy_accepted, gdpr_consent = check_user_consents(user_id)
+			if not privacy_accepted or not gdpr_consent:
+				send_message(
+					vk,
+					peer_id,
+					f"Привет! {'Это ЛС группы.' if is_dm else 'Выбери режим в чате:'}\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}",
+					keyboard=build_sections_keyboard(is_dm),
+				)
+				continue
+
+			# Зарегистрированным: в ЛС — секции; в беседах — игровая клавиатура
 			if is_dm:
-				send_message(vk, peer_id, f"Привет! Это ЛС группы. Выберите режим:\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}", keyboard=build_dm_keyboard())
+				send_message(
+					vk,
+					peer_id,
+					f"Привет! Это ЛС группы. Выберите раздел:\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}",
+					keyboard=build_sections_keyboard(True),
+				)
 			else:
-				send_message(vk, peer_id, f"Привет! Выбери режим в чате:\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}", keyboard=build_main_keyboard())
+				send_message(
+					vk,
+					peer_id,
+					f"Привет! Выбери режим в чате:\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}",
+					keyboard=build_main_keyboard(),
+				)
 			continue
 
 		# Текстовые синонимы для кнопок
