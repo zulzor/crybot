@@ -600,6 +600,37 @@ def _handle_hangman_guess(ctx: RouterContext) -> Optional[str]:
     letter = ctx.text.strip()
     return hangman_manager.guess_letter(ctx.peer_id, letter)
 
+def _handle_chess(ctx: RouterContext) -> Optional[str]:
+    """Обработчик создания шахматной партии"""
+    from games_extended import chess_manager
+    
+    # Простая реализация: создаем игру с ботом
+    bot_player = 999999  # ID бота
+    return chess_manager.create_game(ctx.user_id, bot_player)
+
+def _handle_chess_move(ctx: RouterContext) -> Optional[str]:
+    """Обработчик хода в шахматах"""
+    from games_extended import chess_manager
+    
+    parts = ctx.text.split()
+    if len(parts) < 2:
+        return "❌ Использование: /chess move <game_id> <move>"
+    
+    game_id = parts[0]
+    move = parts[1]
+    
+    return chess_manager.make_move(game_id, ctx.user_id, move)
+
+def _handle_crossword(ctx: RouterContext) -> Optional[str]:
+    """Обработчик начала кроссворда"""
+    from games_extended import crossword_manager
+    return crossword_manager.start_game(ctx.user_id)
+
+def _handle_crossword_guess(ctx: RouterContext) -> Optional[str]:
+    """Обработчик угадывания слова в кроссворде"""
+    from games_extended import crossword_manager
+    return crossword_manager.guess_word(ctx.user_id, ctx.text)
+
 def _handle_poker_create(ctx: RouterContext) -> Optional[str]:
     """Создание покер-стола"""
     from games_extended import poker_manager
@@ -613,6 +644,11 @@ def _handle_poker_join(ctx: RouterContext) -> Optional[str]:
     from bot_vk import get_user_name
     name = get_user_name(ctx.vk, ctx.user_id)
     return poker_manager.join_game(ctx.peer_id, ctx.user_id, name)
+
+def _handle_poker_start(ctx: RouterContext) -> Optional[str]:
+    """Начало покер-игры"""
+    from games_extended import poker_manager
+    return poker_manager.start_game(ctx.peer_id)
 
 # -------- Команды экономики --------
 def _handle_daily(ctx: RouterContext) -> Optional[str]:
@@ -640,6 +676,42 @@ def _handle_buy(ctx: RouterContext) -> Optional[str]:
     from economy_social import economy_manager
     item_id = ctx.text.strip()
     return economy_manager.buy_item(ctx.user_id, item_id)
+
+def _handle_craft(ctx: RouterContext) -> Optional[str]:
+    """Крафтинг предмета"""
+    from economy_social import economy_manager
+    recipe = ctx.text.strip()
+    return economy_manager.craft_item(ctx.user_id, recipe)
+
+def _handle_auction_create(ctx: RouterContext) -> Optional[str]:
+    """Создание аукциона"""
+    from economy_social import economy_manager
+    parts = ctx.text.strip().split()
+    if len(parts) < 3:
+        return "❌ Использование: /auction create <item_id> <quantity> <price>"
+    
+    item_id = parts[0]
+    quantity = int(parts[1])
+    price = int(parts[2])
+    
+    return economy_manager.create_auction(ctx.user_id, item_id, quantity, price)
+
+def _handle_auction_bid(ctx: RouterContext) -> Optional[str]:
+    """Ставка на аукцион"""
+    from economy_social import economy_manager
+    parts = ctx.text.strip().split()
+    if len(parts) < 2:
+        return "❌ Использование: /auction bid <auction_id> <amount>"
+    
+    auction_id = parts[0]
+    amount = int(parts[1])
+    
+    return economy_manager.bid_on_auction(ctx.user_id, auction_id, amount)
+
+def _handle_auction_list(ctx: RouterContext) -> Optional[str]:
+    """Список активных аукционов"""
+    from economy_social import economy_manager
+    return economy_manager.get_active_auctions()
 
 # -------- Социальные команды --------
 def _handle_profile(ctx: RouterContext) -> Optional[str]:
@@ -972,6 +1044,51 @@ def _register_builtin_commands() -> None:
             admin_required=False,
         )
     )
+    register_command(
+        Command(
+            name="/poker start",
+            aliases=["poker start", "покер начать"],
+            description="Начать покер-игру",
+            handler=_handle_poker_start,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/chess",
+            aliases=["chess", "шахматы"],
+            description="Создать шахматную партию",
+            handler=_handle_chess,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/chess move",
+            aliases=["chess move", "шахматы ход"],
+            description="Сделать ход в шахматах: /chess move <game_id> <move>",
+            handler=_handle_chess_move,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/crossword",
+            aliases=["crossword", "кроссворд"],
+            description="Начать кроссворд",
+            handler=_handle_crossword,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/crossword guess",
+            aliases=["crossword guess", "кроссворд угадать"],
+            description="Угадать слово в кроссворде: /crossword guess <слово>",
+            handler=_handle_crossword_guess,
+            admin_required=False,
+        )
+    )
 
     # Экономика
     register_command(
@@ -1016,6 +1133,42 @@ def _register_builtin_commands() -> None:
             aliases=["buy", "купить"],
             description="Купить предмет: /buy <id>",
             handler=_handle_buy,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/craft",
+            aliases=["craft", "крафт"],
+            description="Крафтинг предмета: /craft <recipe>",
+            handler=_handle_craft,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/auction create",
+            aliases=["auction create", "аукцион создать"],
+            description="Создать аукцион: /auction create <item_id> <quantity> <price>",
+            handler=_handle_auction_create,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/auction bid",
+            aliases=["auction bid", "аукцион ставка"],
+            description="Ставка на аукцион: /auction bid <auction_id> <amount>",
+            handler=_handle_auction_bid,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/auction list",
+            aliases=["auction list", "аукцион список"],
+            description="Список активных аукционов",
+            handler=_handle_auction_list,
             admin_required=False,
         )
     )

@@ -258,6 +258,217 @@ class ConductorGame:
         return result
 
 
+# -------- Шахматы --------
+@dataclass
+class ChessGame:
+    game_id: str
+    white_player: int
+    black_player: int
+    current_turn: int  # white_player или black_player
+    board: List[List[str]] = field(default_factory=lambda: [
+        ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+        ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+        ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+    ])
+    move_history: List[str] = field(default_factory=list)
+    start_time: float = field(default_factory=time.time)
+    is_active: bool = True
+    winner: Optional[int] = None
+
+class ChessManager:
+    def __init__(self):
+        self.games: Dict[str, ChessGame] = {}
+        self.game_counter = 1
+    
+    def create_game(self, white_player: int, black_player: int) -> str:
+        game_id = f"chess_{self.game_counter}"
+        self.game_counter += 1
+        
+        game = ChessGame(
+            game_id=game_id,
+            white_player=white_player,
+            black_player=black_player,
+            current_turn=white_player
+        )
+        
+        self.games[game_id] = game
+        return f"♟️ Шахматная партия создана!\n\nБелые: {white_player}\nЧёрные: {black_player}\n\nХод белых. Отправьте ход в формате 'e2e4'"
+    
+    def make_move(self, game_id: str, player_id: int, move: str) -> str:
+        if game_id not in self.games:
+            return "❌ Игра не найдена"
+        
+        game = self.games[game_id]
+        if not game.is_active:
+            return "❌ Игра завершена"
+        
+        if player_id != game.current_turn:
+            return "❌ Не ваш ход"
+        
+        # Простая валидация хода (в реальности нужна сложная логика)
+        if len(move) != 4 or not move.isalpha():
+            return "❌ Неверный формат хода. Используйте 'e2e4'"
+        
+        # Добавляем ход в историю
+        game.move_history.append(move)
+        
+        # Передаём ход
+        game.current_turn = game.black_player if game.current_turn == game.white_player else game.white_player
+        
+        # Простая проверка на мат (заглушка)
+        if len(game.move_history) >= 10:
+            game.is_active = False
+            game.winner = player_id
+            return f"♟️ Игра завершена!\nПобедитель: {game.winner}\nХодов: {len(game.move_history)}"
+        
+        return f"✅ Ход {move} сделан!\nХод {'чёрных' if game.current_turn == game.black_player else 'белых'}"
+    
+    def get_board(self, game_id: str) -> str:
+        if game_id not in self.games:
+            return "❌ Игра не найдена"
+        
+        game = self.games[game_id]
+        board_str = "♟️ Текущая позиция:\n\n"
+        
+        for i, row in enumerate(game.board):
+            board_str += f"{8-i} "
+            for piece in row:
+                if piece == '':
+                    board_str += "· "
+                else:
+                    board_str += f"{piece} "
+            board_str += "\n"
+        
+        board_str += "  a b c d e f g h"
+        return board_str
+
+# -------- Кроссворды --------
+@dataclass
+class CrosswordGame:
+    game_id: str
+    player_id: int
+    words: List[Dict[str, str]]  # [{"word": "ПРИВЕТ", "clue": "Приветствие", "solved": False}]
+    current_word_index: int = 0
+    score: int = 0
+    start_time: float = field(default_factory=time.time)
+    is_active: bool = True
+
+class CrosswordManager:
+    def __init__(self):
+        self.games: Dict[int, CrosswordGame] = {}
+        self.word_sets = [
+            [
+                {"word": "ПРИВЕТ", "clue": "Приветствие на русском"},
+                {"word": "МАШИНА", "clue": "Транспортное средство"},
+                {"word": "КОМПЬЮТЕР", "clue": "Электронное устройство для работы"},
+                {"word": "ПРОГРАММИРОВАНИЕ", "clue": "Создание программ для компьютера"}
+            ],
+            [
+                {"word": "ИГРА", "clue": "Развлечение для детей и взрослых"},
+                {"word": "МУЗЫКА", "clue": "Искусство звуков"},
+                {"word": "КНИГА", "clue": "Печатное издание с текстом"},
+                {"word": "ПРИРОДА", "clue": "Окружающий мир"}
+            ]
+        ]
+    
+    def start_game(self, player_id: int) -> str:
+        if player_id in self.games:
+            return "❌ У вас уже есть активная игра"
+        
+        word_set = random.choice(self.word_sets)
+        game = CrosswordGame(
+            game_id=f"crossword_{player_id}_{int(time.time())}",
+            player_id=player_id,
+            words=word_set.copy()
+        )
+        
+        self.games[player_id] = game
+        
+        return f"📝 Кроссворд начат!\n\nСлово 1: {game.words[0]['clue']}\n\nОтправьте ответ:"
+    
+    def guess_word(self, player_id: int, guess: str) -> str:
+        if player_id not in self.games:
+            return "❌ Нет активной игры"
+        
+        game = self.games[player_id]
+        if not game.is_active:
+            return "❌ Игра завершена"
+        
+        current_word = game.words[game.current_word_index]
+        
+        if guess.upper() == current_word["word"]:
+            current_word["solved"] = True
+            
+            # Вычисляем очки за слово
+            word_length = len(current_word["word"])
+            base_score = word_length * 2  # 2 очка за букву
+            time_bonus = max(0, 30 - (time.time() - game.start_time) // 10)  # Бонус за скорость
+            
+            word_score = base_score + time_bonus
+            game.score += word_score
+            game.current_word_index += 1
+            
+            if game.current_word_index >= len(game.words):
+                # Игра завершена
+                game.is_active = False
+                duration = int(time.time() - game.start_time)
+                
+                # Финальные бонусы
+                completion_bonus = 50  # Бонус за завершение
+                speed_bonus = max(0, 100 - duration // 10)  # Бонус за общую скорость
+                final_score = game.score + completion_bonus + speed_bonus
+                
+                result = f"🎉 Кроссворд решён!\n\n"
+                result += f"📊 Результаты:\n"
+                result += f"💰 Очки: {final_score}\n"
+                result += f"⏱️ Время: {duration} сек\n"
+                result += f"📝 Слов отгадано: {len(game.words)}\n"
+                result += f"🏆 Бонус за завершение: +{completion_bonus}\n"
+                result += f"⚡ Бонус за скорость: +{speed_bonus}\n\n"
+                result += f"Все слова отгаданы!"
+                
+                # Интеграция с экономикой
+                try:
+                    from economy_social import economy_manager
+                    economy_manager.add_money(player_id, final_score // 15)  # ~6.7% от очков в монеты
+                    result += f"\n🪙 Получено монет: {final_score // 15}"
+                except Exception:
+                    pass
+                
+                # Очищаем игру
+                del self.games[player_id]
+                
+                return result
+            else:
+                next_word = game.words[game.current_word_index]
+                return f"✅ Правильно! +{word_score} очков\n\nСлово {game.current_word_index + 1}: {next_word['clue']}\n\nОтправьте ответ:"
+        else:
+            # Подсказки для неправильного ответа
+            hint = self._get_hint(current_word["word"], guess)
+            return f"❌ Неправильно. Попробуйте ещё раз.\n\nПодсказка: {current_word['clue']}\n💡 {hint}"
+    
+    def _get_hint(self, correct_word: str, guess: str) -> str:
+        """Генерирует подсказку на основе неправильного ответа"""
+        if len(guess) != len(correct_word):
+            return f"Слово состоит из {len(correct_word)} букв"
+        
+        # Показываем правильные буквы на правильных позициях
+        correct_positions = sum(1 for i, (c1, c2) in enumerate(zip(guess.upper(), correct_word)) if c1 == c2)
+        if correct_positions > 0:
+            return f"Правильных букв на месте: {correct_positions}"
+        
+        # Показываем общие буквы
+        common_letters = set(guess.upper()) & set(correct_word)
+        if common_letters:
+            return f"Общие буквы: {', '.join(sorted(common_letters))}"
+        
+        return "Попробуйте другое слово"
+
 # -------- Покер --------
 class PokerHand(Enum):
     HIGH_CARD = "старшая карта"
@@ -338,11 +549,40 @@ class PokerGameManager:
         
         game.players[user_id] = PokerPlayer(user_id=user_id, name=name)
         
-        return (
-            f"✅ {name} присоединился к игре!\n"
-            f"👥 Игроков: {len(game.players)}\n"
-            f"💰 Фишки: 1000"
-        )
+        result = f"✅ {name} присоединился к игре!\n"
+        result += f"👥 Игроков: {len(game.players)}\n"
+        result += f"💰 Фишки: 1000\n\n"
+        
+        if len(game.players) >= 2:
+            result += "🎮 Игра готова к началу!\n"
+            result += "Команда: /poker start"
+        else:
+            result += "⏳ Ожидание игроков... (нужно минимум 2)"
+        
+        return result
+    
+    def start_game(self, peer_id: int) -> str:
+        if peer_id not in self.games:
+            return "❌ Игра не найдена"
+        
+        game = self.games[peer_id]
+        if len(game.players) < 2:
+            return "❌ Недостаточно игроков. Нужно минимум 2"
+        
+        # Начинаем игру
+        game.is_active = True
+        game.deal_cards()
+        
+        result = "🎮 Покер начался!\n\n"
+        result += "Карты разданы. Текущий банк: 0\n\n"
+        result += "Доступные действия:\n"
+        result += "• /poker bet <сумма> - сделать ставку\n"
+        result += "• /poker call - уравнять ставку\n"
+        result += "• /poker fold - сбросить карты\n"
+        result += "• /poker check - пас (если нет ставок)\n"
+        result += "• /poker show - показать карты\n"
+        
+        return result
 
 
 # -------- Шахматы --------
@@ -466,10 +706,36 @@ class HangmanManager:
     def _end_game(self, game: HangmanGame, won: bool) -> str:
         game.is_active = False
         
+        # Вычисляем очки
+        duration = int(time.time() - game.start_time)
+        base_score = 100 if won else 10
+        time_bonus = max(0, 60 - duration)  # Бонус за скорость
+        accuracy_bonus = max(0, 50 - game.wrong_guesses * 10)  # Бонус за точность
+        
+        total_score = base_score + time_bonus + accuracy_bonus
+        
         if won:
-            result = f"🎉 Поздравляем! Слово угадано: {game.word}"
+            result = f"🎉 Поздравляем! Слово угадано: {game.word}\n\n"
+            result += f"📊 Результаты:\n"
+            result += f"💰 Очки: {total_score}\n"
+            result += f"⏱️ Время: {duration} сек\n"
+            result += f"🎯 Ошибок: {game.wrong_guesses}\n"
+            result += f"⚡ Бонус за скорость: +{time_bonus}\n"
+            result += f"🎯 Бонус за точность: +{accuracy_bonus}"
         else:
-            result = f"💀 Игра окончена! Слово было: {game.word}"
+            result = f"💀 Игра окончена! Слово было: {game.word}\n\n"
+            result += f"📊 Результаты:\n"
+            result += f"💰 Очки: {total_score}\n"
+            result += f"⏱️ Время: {duration} сек\n"
+            result += f"🎯 Ошибок: {game.wrong_guesses}"
+        
+        # Интеграция с экономикой
+        try:
+            from economy_social import economy_manager
+            economy_manager.add_money(game.peer_id, total_score // 20)  # 5% от очков в монеты
+            result += f"\n🪙 Получено монет: {total_score // 20}"
+        except Exception:
+            pass
         
         # Очищаем игру
         del self.games[game.peer_id]
@@ -481,3 +747,5 @@ class HangmanManager:
 conductor_game = ConductorGame()
 poker_manager = PokerGameManager()
 hangman_manager = HangmanManager()
+chess_manager = ChessManager()
+crossword_manager = CrosswordManager()

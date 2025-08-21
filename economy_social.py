@@ -95,6 +95,68 @@ class EconomyManager:
             effects={"extra_lives": 1},
             is_consumable=True
         )
+        
+        # Материалы для крафтинга
+        self.shop_items["wood"] = ShopItem(
+            id="wood",
+            name="🪵 Дерево",
+            description="Базовый материал для крафтинга",
+            price=10,
+            currency=Currency.CRYCOIN,
+            category="materials",
+            rarity="common",
+            effects={},
+            is_consumable=True
+        )
+        
+        self.shop_items["iron"] = ShopItem(
+            id="iron",
+            name="⛏️ Железо",
+            description="Прочный материал для крафтинга",
+            price=25,
+            currency=Currency.CRYCOIN,
+            category="materials",
+            rarity="common",
+            effects={},
+            is_consumable=True
+        )
+        
+        self.shop_items["gem"] = ShopItem(
+            id="gem",
+            name="💎 Драгоценный камень",
+            description="Редкий материал для элитных предметов",
+            price=100,
+            currency=Currency.CRYCOIN,
+            category="materials",
+            rarity="rare",
+            effects={},
+            is_consumable=True
+        )
+        
+        # Готовые крафтовые предметы
+        self.shop_items["sword"] = ShopItem(
+            id="sword",
+            name="⚔️ Меч",
+            description="Оружие, созданное из железа",
+            price=150,
+            currency=Currency.CRYCOIN,
+            category="crafted",
+            rarity="rare",
+            effects={"attack": 10},
+            is_consumable=False
+        )
+        
+        self.shop_items["shield"] = ShopItem(
+            id="shield",
+            name="🛡️ Щит",
+            description="Защита, созданная из дерева и железа",
+            price=120,
+            currency=Currency.CRYCOIN,
+            category="crafted",
+            rarity="rare",
+            effects={"defense": 8},
+            is_consumable=False
+        )
     
     def get_wallet(self, user_id: int) -> UserWallet:
         if user_id in self.wallets:
@@ -163,6 +225,150 @@ class EconomyManager:
             "total_spent": wallet.total_spent,
         })
         return True
+    
+    def craft_item(self, user_id: int, recipe_name: str) -> str:
+        """Крафтинг предметов"""
+        recipes = {
+            "sword": {
+                "materials": {"iron": 3, "wood": 1},
+                "result": "sword",
+                "name": "⚔️ Меч"
+            },
+            "shield": {
+                "materials": {"iron": 2, "wood": 2},
+                "result": "shield", 
+                "name": "🛡️ Щит"
+            },
+            "magic_staff": {
+                "materials": {"wood": 2, "gem": 1},
+                "result": "magic_staff",
+                "name": "🔮 Магический посох"
+            }
+        }
+        
+        if recipe_name not in recipes:
+            return "❌ Рецепт не найден"
+        
+        recipe = recipes[recipe_name]
+        inventory = self.get_inventory(user_id)
+        
+        # Проверяем материалы
+        for material, amount in recipe["materials"].items():
+            if inventory.items.get(material, 0) < amount:
+                return f"❌ Недостаточно материала: {material} (нужно {amount})"
+        
+        # Тратим материалы
+        for material, amount in recipe["materials"].items():
+            inventory.items[material] -= amount
+            if inventory.items[material] <= 0:
+                del inventory.items[material]
+        
+        # Добавляем результат
+        result_item = recipe["result"]
+        inventory.items[result_item] = inventory.items.get(result_item, 0) + 1
+        
+        # Сохраняем инвентарь
+        self._storage.set("inventories", str(user_id), {
+            "user_id": user_id,
+            "items": inventory.items,
+            "equipped": inventory.equipped
+        })
+        
+        return f"✅ {recipe['name']} создан!"
+    
+    def create_auction(self, user_id: int, item_id: str, quantity: int, starting_price: int) -> str:
+        """Создание аукциона"""
+        inventory = self.get_inventory(user_id)
+        
+        if item_id not in inventory.items or inventory.items[item_id] < quantity:
+            return "❌ Недостаточно предметов для аукциона"
+        
+        # Создаем аукцион
+        auction_id = f"auction_{user_id}_{int(time.time())}"
+        auction = {
+            "id": auction_id,
+            "seller_id": user_id,
+            "item_id": item_id,
+            "quantity": quantity,
+            "starting_price": starting_price,
+            "current_price": starting_price,
+            "highest_bidder": None,
+            "created_at": time.time(),
+            "ends_at": time.time() + 3600,  # 1 час
+            "is_active": True
+        }
+        
+        # Убираем предметы из инвентаря
+        inventory.items[item_id] -= quantity
+        if inventory.items[item_id] <= 0:
+            del inventory.items[item_id]
+        
+        # Сохраняем аукцион и инвентарь
+        self._storage.set("auctions", auction_id, auction)
+        self._storage.set("inventories", str(user_id), {
+            "user_id": user_id,
+            "items": inventory.items,
+            "equipped": inventory.equipped
+        })
+        
+        item = self.shop_items.get(item_id)
+        item_name = item.name if item else item_id
+        
+        return f"🏷️ Аукцион создан!\n\nПредмет: {item_name}\nКоличество: {quantity}\nСтартовая цена: {starting_price} 🪙\n\nID аукциона: {auction_id}"
+    
+    def bid_on_auction(self, user_id: int, auction_id: str, bid_amount: int) -> str:
+        """Ставка на аукцион"""
+        auction_data = self._storage.get("auctions", auction_id)
+        if not auction_data:
+            return "❌ Аукцион не найден"
+        
+        if not auction_data.get("is_active", False):
+            return "❌ Аукцион завершён"
+        
+        if time.time() > auction_data.get("ends_at", 0):
+            return "❌ Время аукциона истекло"
+        
+        if bid_amount <= auction_data.get("current_price", 0):
+            return "❌ Ставка должна быть выше текущей"
+        
+        wallet = self.get_wallet(user_id)
+        if wallet.balance.get(Currency.CRYCOIN, 0) < bid_amount:
+            return "❌ Недостаточно средств"
+        
+        # Обновляем аукцион
+        auction_data["current_price"] = bid_amount
+        auction_data["highest_bidder"] = user_id
+        
+        self._storage.set("auctions", auction_id, auction_data)
+        
+        return f"✅ Ставка {bid_amount} 🪙 принята!"
+    
+    def get_active_auctions(self) -> str:
+        """Получение списка активных аукционов"""
+        all_auctions = self._storage.get_all("auctions")
+        active_auctions = []
+        
+        for auction_id, auction_data in all_auctions.items():
+            if auction_data.get("is_active", False) and time.time() <= auction_data.get("ends_at", 0):
+                active_auctions.append((auction_id, auction_data))
+        
+        if not active_auctions:
+            return "🏷️ Активных аукционов нет"
+        
+        result = "🏷️ Активные аукционы:\n\n"
+        for auction_id, auction_data in active_auctions[:5]:  # Показываем первые 5
+            item = self.shop_items.get(auction_data["item_id"])
+            item_name = item.name if item else auction_data["item_id"]
+            
+            time_left = int(auction_data["ends_at"] - time.time())
+            minutes = time_left // 60
+            
+            result += f"📦 {item_name} x{auction_data['quantity']}\n"
+            result += f"💰 Текущая цена: {auction_data['current_price']} 🪙\n"
+            result += f"⏰ Осталось: {minutes} мин\n"
+            result += f"🏷️ ID: {auction_id}\n\n"
+        
+        return result
     
     def daily_bonus(self, user_id: int) -> str:
         wallet = self.get_wallet(user_id)
