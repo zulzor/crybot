@@ -180,6 +180,8 @@ def _build_business_inline_keyboard() -> str:
     rows = [
         [("💳 Баланс", {"action": "business_action", "value": "balance"}), ("🎁 Ежедневный", {"action": "business_action", "value": "daily"})],
         [("🏪 Магазин", {"action": "business_action", "value": "shop"}), ("📦 Инвентарь", {"action": "business_action", "value": "inventory"})],
+        [("🏬 Активы", {"action": "business_action", "value": "assets"}), ("🔧 Улучшить", {"action": "business_action", "value": "upgrade"})],
+        [("🌟 Престиж", {"action": "business_action", "value": "prestige"})],
     ]
     return _build_inline_keyboard(rows)
 
@@ -217,6 +219,63 @@ def _handle_business_action(ctx: RouterContext) -> Optional[str]:
         for iid, qty in inv.items.items():
             lines.append(f"• {iid}: x{qty}")
         _send_with_keyboard(ctx, "\n".join(lines), _build_business_inline_keyboard())
+        return None
+    if action == "assets":
+        # Показ магазина активов из bot_vk
+        try:
+            from bot_vk import get_business_shop
+            msg = get_business_shop()
+        except Exception:
+            msg = "🏪 Магазин активов недоступен"
+        kb_rows = []
+        try:
+            from bot_vk import BUSINESS_ASSETS  # dict of asset_key -> BusinessAsset
+            row = []
+            for key in BUSINESS_ASSETS.keys():
+                label = f"/buy_asset {key}"
+                row.append((label, {"action": "text", "value": f"buy_asset {key}"}))
+                if len(row) == 2:
+                    kb_rows.append(row)
+                    row = []
+            if row:
+                kb_rows.append(row)
+        except Exception:
+            pass
+        kb = _build_inline_keyboard(kb_rows) if kb_rows else _build_business_inline_keyboard()
+        _send_with_keyboard(ctx, msg, kb)
+        return None
+    if action == "upgrade":
+        # Показ улучшений доступных активов пользователя
+        try:
+            from bot_vk import get_business_profile
+            prof = get_business_profile(ctx.user_id)
+            if not prof.assets:
+                _send_with_keyboard(ctx, "❌ Нет активов для улучшения", _build_business_inline_keyboard())
+                return None
+            lines = ["🔧 Доступные для улучшения:"]
+            kb_rows = []
+            row = []
+            for k, a in prof.assets.items():
+                lines.append(f"• {a.name} (ур.{a.level})")
+                label = f"/upgrade_asset {k}"
+                row.append((label, {"action": "text", "value": f"upgrade_asset {k}"}))
+                if len(row) == 2:
+                    kb_rows.append(row)
+                    row = []
+            if row:
+                kb_rows.append(row)
+            kb = _build_inline_keyboard(kb_rows)
+            _send_with_keyboard(ctx, "\n".join(lines), kb)
+        except Exception:
+            _send_with_keyboard(ctx, "❌ Не удалось получить данные", _build_business_inline_keyboard())
+        return None
+    if action == "prestige":
+        try:
+            from bot_vk import prestige_reset
+            msg = prestige_reset(ctx.user_id)
+            _send_with_keyboard(ctx, msg, _build_business_inline_keyboard())
+        except Exception:
+            _send_with_keyboard(ctx, "❌ Престиж недоступен", _build_business_inline_keyboard())
         return None
     return None
 
@@ -367,6 +426,24 @@ def dispatch_command(
         action = raw.split(" ", 1)[1].strip()
         ctx2 = RouterContext(vk=vk, peer_id=peer_id, user_id=user_id, text=action, is_dm=is_dm)
         return True, _handle_business_action(ctx2)
+    if lower.startswith("buy_asset "):
+        asset_key = raw.split(" ", 1)[1].strip()
+        try:
+            from bot_vk import buy_asset
+            msg = buy_asset(user_id, asset_key)
+            _send_with_keyboard(ctx, msg, _build_business_inline_keyboard())
+            return True, None
+        except Exception:
+            return True, "❌ Покупка недоступна"
+    if lower.startswith("upgrade_asset "):
+        asset_key = raw.split(" ", 1)[1].strip()
+        try:
+            from bot_vk import upgrade_asset
+            msg = upgrade_asset(user_id, asset_key)
+            _send_with_keyboard(ctx, msg, _build_business_inline_keyboard())
+            return True, None
+        except Exception:
+            return True, "❌ Улучшение недоступно"
 
     # Контекст/права
     if cmd.dm_only and not is_dm:
