@@ -3246,7 +3246,7 @@ def main() -> None:
 				send_message(vk, peer_id, reply)
 			continue
 
-		if text == "/start":
+		if text in {"/start", "start", "начать"}:
 			if is_dm:
 				send_message(vk, peer_id, f"Привет! Это ЛС группы. Выберите режим:\n\n📱 Версия: {BOT_VERSION}\n🔧 Сборка: {BOT_BUILD}", keyboard=build_dm_keyboard())
 			else:
