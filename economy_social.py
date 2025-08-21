@@ -241,8 +241,9 @@ class EconomyManager:
         
         result = "🛒 Магазин:\n\n"
         for item in items:
+            rarity_emoji = {"common": "⚪", "rare": "🔵", "epic": "🟣", "legendary": "🟡"}.get(item.rarity, "⚪")
             result += (
-                f"🎁 {item.name}\n"
+                f"{rarity_emoji} {item.name}\n"
                 f"📝 {item.description}\n"
                 f"💰 {item.price} {item.currency.value}\n"
                 f"⭐ {item.rarity.upper()}\n"

@@ -384,15 +384,94 @@ def dispatch_command(
     if lower == "admin_lang" and _is_admin_check(user_id):
         _send_with_keyboard(ctx, t(user_id, "select_lang"), _build_lang_inline_keyboard())
         return True, None
+    if lower == "admin_monitoring" and _is_admin_check(user_id):
+        try:
+            from monitoring import health_checker, metrics_collector, START_TIME
+            import time
+            
+            # Получаем краткую статистику
+            overall_status = health_checker.get_overall_status()
+            
+            # Основные метрики
+            total_requests = metrics_collector.get_counter("ai_requests_total")
+            successful_requests = metrics_collector.get_counter("ai_success_total")
+            failed_requests = metrics_collector.get_counter("ai_errors_total")
+            
+            # Uptime
+            uptime_hours = (time.time() - START_TIME) / 3600
+            
+            # Активные пользователи
+            from storage import get_storage_from_env
+            storage = get_storage_from_env()
+            profiles = storage.get_all("profiles")
+            current_time = time.time()
+            one_hour_ago = current_time - 3600
+            active_users = sum(1 for profile in profiles.values() 
+                              if isinstance(profile, dict) and 
+                              profile.get('last_activity', 0) > one_hour_ago)
+            
+            # Формируем ответ
+            status_emoji = {"healthy": "✅", "degraded": "⚠️", "unhealthy": "❌"}.get(overall_status, "❓")
+            
+            text = f"""📊 Мониторинг системы
+
+🏥 Статус: {status_emoji} {overall_status}
+⏱️ Время работы: {uptime_hours:.1f} ч
+📈 Запросов ИИ: {total_requests}
+✅ Успешных: {successful_requests}
+❌ Ошибок: {failed_requests}
+👥 Активных пользователей: {active_users}"""
+            
+            # Inline-кнопки для мониторинга
+            keyboard = VkKeyboard(inline=True)
+            keyboard.add_button("📊 Подробная статистика", color=VkKeyboardColor.PRIMARY)
+            keyboard.add_line()
+            keyboard.add_button("🏥 Состояние системы", color=VkKeyboardColor.SECONDARY)
+            keyboard.add_button("🗑️ Очистить кеш", color=VkKeyboardColor.NEGATIVE)
+            keyboard.add_line()
+            keyboard.add_button("🔙 Назад в админ-меню", color=VkKeyboardColor.SECONDARY)
+            
+            _send_with_keyboard(ctx, text, keyboard.get_keyboard())
+            return True, None
+            
+        except Exception as e:
+            return True, f"❌ Ошибка мониторинга: {str(e)}"
     if lower.startswith("set_storage") and _is_admin_check(user_id):
-        # Простейшая реализация: меняем переменную окружения процесса (для примера), в реальном окружении — перезапуск
         parts = raw.split()
         value = parts[-1].strip().lower() if len(parts) > 1 else "sqlite"
         if value not in {"sqlite", "json", "hybrid"}:
             return True, "❌ Недопустимое значение: sqlite|json|hybrid"
-        os.environ["STORAGE_BACKEND"] = value
-        _send_with_keyboard(ctx, f"✅ STORAGE_BACKEND={value}. Изменение вступит в силу после перезапуска.", _build_storage_inline_keyboard())
-        return True, None
+        
+        # Сохраняем в .env файл
+        try:
+            env_path = ".env"
+            if os.path.exists(env_path):
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                # Ищем и заменяем STORAGE_BACKEND
+                found = False
+                for i, line in enumerate(lines):
+                    if line.startswith("STORAGE_BACKEND="):
+                        lines[i] = f"STORAGE_BACKEND={value}\n"
+                        found = True
+                        break
+                
+                if not found:
+                    lines.append(f"STORAGE_BACKEND={value}\n")
+                
+                with open(env_path, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+            else:
+                # Создаем .env если не существует
+                with open(env_path, 'w', encoding='utf-8') as f:
+                    f.write(f"STORAGE_BACKEND={value}\n")
+            
+            os.environ["STORAGE_BACKEND"] = value
+            _send_with_keyboard(ctx, f"✅ STORAGE_BACKEND={value}. Изменение сохранено в .env и вступит в силу после перезапуска.", _build_storage_inline_keyboard())
+            return True, None
+        except Exception as e:
+            return True, f"❌ Ошибка сохранения: {str(e)}"
     if lower.startswith("set_lang") and _is_admin_check(user_id):
         parts = raw.split()
         value = parts[-1].strip().lower() if len(parts) > 1 else "ru"
