@@ -1,858 +1,537 @@
 """
-Расширенные игры для CryBot
+Игры для CryBot с правильным UX и inline-кнопками
 """
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 
 
-# -------- Проводница РЖД --------
-class TrainStatus(Enum):
-    ON_TIME = "время"
-    DELAYED = "задержка"
-    CANCELLED = "отменён"
-    DIVERTED = "перенаправлен"
+# -------- Базовые структуры для игр --------
+@dataclass
+class GameAction:
+    """Действие в игре с кнопкой"""
+    label: str
+    emoji: str
+    next_state: str
+    command: str  # команда для обработки
 
 
 @dataclass
-class Train:
-    number: str
-    route: str
-    departure: str
-    arrival: str
-    status: TrainStatus
-    delay_minutes: int = 0
-    platform: str = "?"
-    passengers: int = 0
-    problems: List[str] = field(default_factory=list)
+class GameState:
+    """Состояние игры"""
+    state_id: str
+    title: str
+    description: str
+    actions: List[GameAction]
+    progress_text: str = ""
+    show_progress_bar: bool = False
 
 
 @dataclass
-class ConductorSession:
-    peer_id: int
+class GameSession:
+    """Сессия игры пользователя"""
     user_id: int
-    score: int = 0
-    trains_handled: int = 0
-    passengers_helped: int = 0
-    problems_solved: int = 0
+    peer_id: int
+    game_type: str
+    current_state: str
     start_time: float = field(default_factory=time.time)
-    current_train: Optional[Train] = None
-    is_active: bool = False
+    data: Dict[str, Any] = field(default_factory=dict)  # игровые данные
+    is_active: bool = True
 
 
-class ConductorGame:
+class GameEngine:
+    """Движок для управления играми"""
+    
     def __init__(self):
-        self.sessions: Dict[int, ConductorSession] = {}
-        self.routes = [
-            "Москва - Санкт-Петербург",
-            "Москва - Екатеринбург", 
-            "Санкт-Петербург - Сочи",
-            "Казань - Москва",
-            "Новосибирск - Москва",
-            "Владивосток - Москва",
-            "Калининград - Москва"
-        ]
-        self.stations = [
-            "Москва", "Санкт-Петербург", "Екатеринбург", "Сочи", "Казань",
-            "Новосибирск", "Владивосток", "Калининград", "Нижний Новгород",
-            "Самара", "Ростов-на-Дону", "Уфа", "Краснодар", "Пермь"
-        ]
-        self.problems = [
-            "опоздание", "переполнение", "поломка", "погодные условия",
-            "ремонт пути", "карантин", "технические работы"
-        ]
+        self.sessions: Dict[str, GameSession] = {}
+        self.games: Dict[str, Dict[str, GameState]] = {}
+        self._init_games()
     
-    def start_session(self, peer_id: int, user_id: int) -> str:
-        if peer_id in self.sessions:
-            return "❌ Игра уже идёт в этом чате"
-        
-        session = ConductorSession(peer_id=peer_id, user_id=user_id, is_active=True)
-        self.sessions[peer_id] = session
-        
-        # Генерируем первый поезд
-        train = self._generate_train()
-        session.current_train = train
-        
-        return (
-            f"🚂 Добро пожаловать на работу проводницы РЖД!\n\n"
-            f"Поезд №{train.number}\n"
-            f"Маршрут: {train.route}\n"
-            f"Отправление: {train.departure}\n"
-            f"Прибытие: {train.arrival}\n"
-            f"Статус: {train.status.value}\n"
-            f"Платформа: {train.platform}\n"
-            f"Пассажиры: {train.passengers}\n\n"
-            f"Что делаем? (проверить билеты, помочь пассажирам, решить проблемы)"
-        )
+    def _init_games(self):
+        """Инициализация всех игр"""
+        self._init_conductor_game()
+        self._init_hangman_game()
+        self._init_poker_game()
     
-    def _generate_train(self) -> Train:
-        route = random.choice(self.routes)
-        dep, arr = route.split(" - ")
-        
-        status = random.choice(list(TrainStatus))
-        delay = random.randint(0, 120) if status == TrainStatus.DELAYED else 0
-        
-        problems = []
-        if random.random() < 0.3:  # 30% шанс проблем
-            problems = random.sample(self.problems, random.randint(1, 2))
-        
-        return Train(
-            number=f"{random.randint(1, 999):03d}",
-            route=route,
-            departure=dep,
-            arrival=arr,
-            status=status,
-            delay_minutes=delay,
-            platform=str(random.randint(1, 20)),
-            passengers=random.randint(50, 500),
-            problems=problems
-        )
-    
-    def handle_action(self, peer_id: int, action: str) -> str:
-        if peer_id not in self.sessions:
-            return "❌ Игра не запущена. Напиши /conductor"
-        
-        session = self.sessions[peer_id]
-        if not session.is_active:
-            return "❌ Игра завершена"
-        
-        train = session.current_train
-        if not train:
-            return "❌ Ошибка: поезд не найден"
-        
-        if action == "проверить билеты":
-            return self._check_tickets(session, train)
-        elif action == "помочь пассажирам":
-            return self._help_passengers(session, train)
-        elif action == "решить проблемы":
-            return self._solve_problems(session, train)
-        elif action == "следующий поезд":
-            return self._next_train(session)
-        elif action == "завершить смену":
-            return self._end_shift(session)
-        else:
-            return (
-                f"❓ Непонятная команда. Доступные действия:\n"
-                f"• проверить билеты\n"
-                f"• помочь пассажирам\n"
-                f"• решить проблемы\n"
-                f"• следующий поезд\n"
-                f"• завершить смену"
+    def _init_conductor_game(self):
+        """Инициализация игры 'Проводница РЖД'"""
+        self.games["conductor"] = {
+            "welcome": GameState(
+                state_id="welcome",
+                title="🚂 Проводница РЖД",
+                description="Привет! Это 'Проводница РЖД' — помоги пассажирам и сохрани поезд. Выбери действие:",
+                actions=[
+                    GameAction("Начать смену", "🚂", "on_duty", "start_shift"),
+                    GameAction("Правила игры", "📖", "rules", "show_rules")
+                ]
+            ),
+            "rules": GameState(
+                state_id="rules",
+                title="📖 Правила игры",
+                description="""🎯 Цель: Помогай пассажирам и проверяй билеты
+⏱️ Время: 5 поездов за смену
+💰 Награда: Очки за каждый поезд
+🏆 Бонус: За быструю и качественную работу""",
+                actions=[
+                    GameAction("Начать игру", "🚂", "on_duty", "start_shift"),
+                    GameAction("Назад", "⬅️", "welcome", "back")
+                ]
+            ),
+            "on_duty": GameState(
+                state_id="on_duty",
+                title="🚂 Проводница РЖД",
+                description="Ты на поезде. Пассажиры заходят в вагон. Что делаешь?",
+                actions=[
+                    GameAction("Проверить билеты", "🎫", "check_tickets", "check_tickets"),
+                    GameAction("Помочь пассажирам", "🤝", "help_passengers", "help_passengers"),
+                    GameAction("Решить проблемы", "🔧", "solve_problems", "solve_problems"),
+                    GameAction("Следующий поезд", "➡️", "next_train", "next_train")
+                ],
+                progress_text="Поезд {current_train} из {total_trains}",
+                show_progress_bar=True
+            ),
+            "check_tickets": GameState(
+                state_id="check_tickets",
+                title="🎫 Проверка билетов",
+                description="Проверяешь билеты у пассажиров...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "on_duty", "continue"),
+                    GameAction("Завершить смену", "🏁", "end_shift", "end_shift")
+                ]
+            ),
+            "help_passengers": GameState(
+                state_id="help_passengers",
+                title="🤝 Помощь пассажирам",
+                description="Помогаешь пассажирам с багажом и вопросами...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "on_duty", "continue"),
+                    GameAction("Завершить смену", "🏁", "end_shift", "end_shift")
+                ]
+            ),
+            "solve_problems": GameState(
+                state_id="solve_problems",
+                title="🔧 Решение проблем",
+                description="Решаешь проблемы с кондиционером и освещением...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "on_duty", "continue"),
+                    GameAction("Завершить смену", "🏁", "end_shift", "end_shift")
+                ]
+            ),
+            "next_train": GameState(
+                state_id="next_train",
+                title="➡️ Следующий поезд",
+                description="Переходишь к следующему поезду...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "on_duty", "continue"),
+                    GameAction("Завершить смену", "🏁", "end_shift", "end_shift")
+                ]
+            ),
+            "end_shift": GameState(
+                state_id="end_shift",
+                title="🏁 Смена завершена",
+                description="Подводим итоги твоей работы...",
+                actions=[
+                    GameAction("Новая смена", "🔄", "welcome", "new_shift"),
+                    GameAction("В главное меню", "🏠", "main_menu", "main_menu")
+                ]
             )
+        }
     
-    def _check_tickets(self, session: ConductorSession, train: Train) -> str:
-        # Проверка билетов
-        score_gain = random.randint(5, 15)
-        session.score += score_gain
-        session.trains_handled += 1
+    def _init_hangman_game(self):
+        """Инициализация игры 'Виселица'"""
+        self.games["hangman"] = {
+            "welcome": GameState(
+                state_id="welcome",
+                title="🎯 Виселица",
+                description="Привет! Это 'Виселица' — угадай слово по буквам. Выбери действие:",
+                actions=[
+                    GameAction("Начать игру", "🎯", "playing", "start_game"),
+                    GameAction("Правила", "📖", "rules", "show_rules")
+                ]
+            ),
+            "rules": GameState(
+                state_id="rules",
+                title="📖 Правила Виселицы",
+                description="""🎯 Цель: Угадай слово по буквам
+❌ Ошибок: Максимум 6
+⏱️ Время: Чем быстрее, тем больше очков
+💰 Награда: Очки за скорость и точность""",
+                actions=[
+                    GameAction("Начать игру", "🎯", "playing", "start_game"),
+                    GameAction("Назад", "⬅️", "welcome", "back")
+                ]
+            ),
+            "playing": GameState(
+                state_id="playing",
+                title="🎯 Виселица",
+                description="Угадывай буквы! Слово: {word_display}",
+                actions=[
+                    GameAction("Угадать букву", "🔤", "guess_letter", "guess_letter"),
+                    GameAction("Сдаться", "🏳️", "game_over", "give_up")
+                ],
+                progress_text="Ошибок: {wrong_guesses}/6",
+                show_progress_bar=True
+            ),
+            "guess_letter": GameState(
+                state_id="guess_letter",
+                title="🔤 Угадывание буквы",
+                description="Введи букву для угадывания...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "playing", "continue"),
+                    GameAction("Сдаться", "🏳️", "game_over", "give_up")
+                ]
+            ),
+            "game_over": GameState(
+                state_id="game_over",
+                title="🏁 Игра окончена",
+                description="Результат игры...",
+                actions=[
+                    GameAction("Новая игра", "🔄", "welcome", "new_game"),
+                    GameAction("В главное меню", "🏠", "main_menu", "main_menu")
+                ]
+            )
+        }
+    
+    def _init_poker_game(self):
+        """Инициализация игры 'Покер'"""
+        self.games["poker"] = {
+            "welcome": GameState(
+                state_id="welcome",
+                title="🃏 Покер",
+                description="Привет! Это 'Покер' — создай стол или присоединись к игре. Выбери действие:",
+                actions=[
+                    GameAction("Создать стол", "🃏", "create_table", "create_table"),
+                    GameAction("Присоединиться", "➕", "join_table", "join_table"),
+                    GameAction("Правила", "📖", "rules", "show_rules")
+                ]
+            ),
+            "rules": GameState(
+                state_id="rules",
+                title="📖 Правила Покера",
+                description="""🃏 Цель: Собрать лучшую комбинацию карт
+👥 Игроков: 2-8 человек
+💰 Ставки: Фишки за действия
+🏆 Победа: Последний игрок с картами""",
+                actions=[
+                    GameAction("Создать стол", "🃏", "create_table", "create_table"),
+                    GameAction("Присоединиться", "➕", "join_table", "join_table"),
+                    GameAction("Назад", "⬅️", "welcome", "back")
+                ]
+            ),
+            "create_table": GameState(
+                state_id="create_table",
+                title="🃏 Создание стола",
+                description="Стол создан! Ожидание игроков...",
+                actions=[
+                    GameAction("Начать игру", "🎮", "playing", "start_game"),
+                    GameAction("Отменить", "❌", "welcome", "cancel")
+                ]
+            ),
+            "join_table": GameState(
+                state_id="join_table",
+                title="➕ Присоединение к столу",
+                description="Выбери стол для присоединения...",
+                actions=[
+                    GameAction("Стол #1", "🃏", "playing", "join_1"),
+                    GameAction("Стол #2", "🃏", "playing", "join_2"),
+                    GameAction("Назад", "⬅️", "welcome", "back")
+                ]
+            ),
+            "playing": GameState(
+                state_id="playing",
+                title="🃏 Покер",
+                description="Твой ход! Выбери действие:",
+                actions=[
+                    GameAction("Ставка", "💰", "bet", "bet"),
+                    GameAction("Колл", "✅", "call", "call"),
+                    GameAction("Фолд", "❌", "fold", "fold"),
+                    GameAction("Чек", "🤝", "check", "check")
+                ],
+                progress_text="Банк: {pot} 🪙 | Твои фишки: {chips}",
+                show_progress_bar=True
+            ),
+            "bet": GameState(
+                state_id="bet",
+                title="💰 Ставка",
+                description="Введи сумму ставки...",
+                actions=[
+                    GameAction("Продолжить", "➡️", "playing", "continue"),
+                    GameAction("Отмена", "❌", "playing", "cancel")
+                ]
+            ),
+            "game_over": GameState(
+                state_id="game_over",
+                title="🏁 Игра окончена",
+                description="Результат игры...",
+                actions=[
+                    GameAction("Новая игра", "🔄", "welcome", "new_game"),
+                    GameAction("В главное меню", "🏠", "main_menu", "main_menu")
+                ]
+            )
+        }
+    
+    def start_game(self, user_id: int, peer_id: int, game_type: str) -> Tuple[str, List[Dict[str, str]]]:
+        """Начать игру"""
+        session_id = f"{game_type}_{user_id}_{peer_id}"
         
-        # Случайные события при проверке билетов
-        events = [
-            "Все пассажиры имеют действующие билеты ✅",
-            "Нашли безбилетника, но он купил билет ✅",
-            "Пассажир потерял билет, помогли восстановить ✅",
-            "Проверили билеты у VIP-пассажира ✅",
-            "Обнаружили поддельный билет, пассажир купил новый ✅"
-        ]
-        event = random.choice(events)
-        
-        return (
-            f"🎫 Проверка билетов завершена!\n"
-            f"{event}\n"
-            f"💰 +{score_gain} очков\n"
-            f"📊 Общий счёт: {session.score}"
+        # Создаем сессию
+        session = GameSession(
+            user_id=user_id,
+            peer_id=peer_id,
+            game_type=game_type,
+            current_state="welcome"
         )
+        self.sessions[session_id] = session
+        
+        return self._get_state_message(session_id)
     
-    def _help_passengers(self, session: ConductorSession, train: Train) -> str:
-        # Помощь пассажирам
-        help_count = random.randint(3, 8)
-        score_gain = help_count * 2
-        session.score += score_gain
-        session.passengers_helped += help_count
+    def handle_action(self, user_id: int, peer_id: int, game_type: str, command: str) -> Tuple[str, List[Dict[str, str]]]:
+        """Обработать действие в игре"""
+        session_id = f"{game_type}_{user_id}_{peer_id}"
         
-        # Случайные события помощи пассажирам
-        events = [
-            f"Помогли {help_count} пассажирам с багажом 🤝",
-            f"Объяснили расписание поездов {help_count} пассажирам 🤝", 
-            f"Нашли потерянные вещи для {help_count} пассажиров 🤝",
-            f"Помогли {help_count} пассажирам с детьми 🤝",
-            f"Оказали первую помощь {help_count} пассажирам 🏥"
-        ]
-        event = random.choice(events)
+        if session_id not in self.sessions:
+            return "❌ Игра не найдена. Начни новую игру.", []
         
-        return (
-            f"👥 Помощь пассажирам оказана!\n"
-            f"{event}\n"
-            f"💰 +{score_gain} очков\n"
-            f"📊 Общий счёт: {session.score}"
-        )
+        session = self.sessions[session_id]
+        if not session.is_active:
+            return "❌ Игра завершена.", []
+        
+        # Обрабатываем команду
+        result = self._process_command(session, command)
+        
+        return self._get_state_message(session_id)
     
-    def _solve_problems(self, session: ConductorSession, train: Train) -> str:
-        if not train.problems:
-            return "✅ Проблем нет, поезд идёт по расписанию!"
+    def _process_command(self, session: GameSession, command: str) -> str:
+        """Обработать команду и обновить состояние"""
+        game_type = session.game_type
+        current_state = session.current_state
         
-        # Решение проблем
-        solved = random.randint(1, len(train.problems))
-        score_gain = solved * 10
-        session.score += score_gain
-        session.problems_solved += solved
+        # Обработка команд для разных игр
+        if game_type == "conductor":
+            return self._process_conductor_command(session, command)
+        elif game_type == "hangman":
+            return self._process_hangman_command(session, command)
+        elif game_type == "poker":
+            return self._process_poker_command(session, command)
         
-        return (
-            f"🔧 Проблемы решены!\n"
-            f"✅ Решили {solved} из {len(train.problems)} проблем\n"
-            f"💰 +{score_gain} очков\n"
-            f"📊 Общий счёт: {session.score}"
-        )
+        return "❌ Неизвестная команда"
     
-    def _next_train(self, session: ConductorSession) -> str:
-        # Переход к следующему поезду
-        train = self._generate_train()
-        session.current_train = train
+    def _process_conductor_command(self, session: GameSession, command: str) -> str:
+        """Обработать команду в игре 'Проводница РЖД'"""
+        if command == "start_shift":
+            session.current_state = "on_duty"
+            session.data["current_train"] = 1
+            session.data["total_trains"] = 5
+            session.data["passengers_helped"] = 0
+            session.data["tickets_checked"] = 0
+            session.data["problems_solved"] = 0
+            return "✅ Смена началась! Ты на первом поезде."
         
-        return (
-            f"🚂 Следующий поезд!\n\n"
-            f"Поезд №{train.number}\n"
-            f"Маршрут: {train.route}\n"
-            f"Отправление: {train.departure}\n"
-            f"Прибытие: {train.arrival}\n"
-            f"Статус: {train.status.value}\n"
-            f"Платформа: {train.platform}\n"
-            f"Пассажиры: {train.passengers}\n"
-            f"Проблемы: {', '.join(train.problems) if train.problems else 'нет'}"
-        )
+        elif command == "check_tickets":
+            session.current_state = "check_tickets"
+            session.data["tickets_checked"] += 1
+            return "✅ Билеты проверены! Все пассажиры довольны 😊"
+        
+        elif command == "help_passengers":
+            session.current_state = "help_passengers"
+            session.data["passengers_helped"] += 1
+            return "✅ Помог пассажиру! Спасибо за помощь 🤝"
+        
+        elif command == "solve_problems":
+            session.current_state = "solve_problems"
+            session.data["problems_solved"] += 1
+            return "✅ Проблема решена! Поезд работает исправно 🔧"
+        
+        elif command == "next_train":
+            session.current_state = "next_train"
+            session.data["current_train"] += 1
+            if session.data["current_train"] > session.data["total_trains"]:
+                session.current_state = "end_shift"
+                return "🏁 Все поезда обработаны! Смена завершена."
+            return f"➡️ Переход к поезду {session.data['current_train']} из {session.data['total_trains']}"
+        
+        elif command == "end_shift":
+            session.current_state = "end_shift"
+            return "🏁 Смена завершена! Подводим итоги..."
+        
+        elif command == "continue":
+            session.current_state = "on_duty"
+            return "➡️ Продолжаем работу!"
+        
+        elif command == "new_shift":
+            session.current_state = "welcome"
+            session.data.clear()
+            return "🔄 Новая смена готова к началу!"
+        
+        elif command == "back":
+            session.current_state = "welcome"
+            return "⬅️ Возвращаемся в главное меню"
+        
+        return "❌ Неизвестная команда"
     
-    def _end_shift(self, session: ConductorSession) -> str:
-        # Завершение смены
-        duration = int(time.time() - session.start_time) // 60
-        session.is_active = False
+    def _process_hangman_command(self, session: GameSession, command: str) -> str:
+        """Обработать команду в игре 'Виселица'"""
+        if command == "start_game":
+            session.current_state = "playing"
+            words = ["программирование", "компьютер", "алгоритм", "база данных", "интернет"]
+            session.data["word"] = random.choice(words)
+            session.data["guessed_letters"] = set()
+            session.data["wrong_guesses"] = 0
+            session.data["word_display"] = "_" * len(session.data["word"])
+            return "🎯 Игра началась! Угадывай буквы!"
         
-        total_score = session.score
-        bonus = session.trains_handled * 5 + session.passengers_helped * 2 + session.problems_solved * 10
+        elif command == "guess_letter":
+            session.current_state = "guess_letter"
+            return "🔤 Введи букву для угадывания..."
         
-        final_score = total_score + bonus
+        elif command == "continue":
+            session.current_state = "playing"
+            return "➡️ Продолжаем игру!"
         
-        # Сохраняем результат в экономику
-        try:
-            from economy_social import economy_manager
-            economy_manager.add_money(session.user_id, final_score // 10)  # 10% от очков в монеты
-        except Exception:
-            pass
+        elif command == "give_up":
+            session.current_state = "game_over"
+            session.is_active = False
+            return f"🏁 Игра окончена! Слово было: {session.data.get('word', 'неизвестно')}"
         
-        result = (
-            f"🏁 Смена завершена!\n\n"
-            f"📊 Статистика:\n"
-            f"• Обработано поездов: {session.trains_handled}\n"
-            f"• Помогли пассажирам: {session.passengers_helped}\n"
-            f"• Решили проблем: {session.problems_solved}\n"
-            f"• Время смены: {duration} мин\n\n"
-            f"💰 Итоговый счёт: {final_score}\n"
-            f"🎯 Бонус за эффективность: +{bonus}\n"
-            f"🪙 Получено монет: {final_score // 10}"
-        )
+        elif command == "new_game":
+            session.current_state = "welcome"
+            session.data.clear()
+            session.is_active = True
+            return "🔄 Новая игра готова!"
         
-        # Очищаем сессию
-        del self.sessions[session.peer_id]
+        elif command == "back":
+            session.current_state = "welcome"
+            return "⬅️ Возвращаемся в главное меню"
         
-        return result
-
-
-# -------- Шахматы --------
-@dataclass
-class ChessGame:
-    game_id: str
-    white_player: int
-    black_player: int
-    current_turn: int  # white_player или black_player
-    board: List[List[str]] = field(default_factory=lambda: [
-        ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
-        ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
-        ['', '', '', '', '', '', '', ''],
-        ['', '', '', '', '', '', '', ''],
-        ['', '', '', '', '', '', '', ''],
-        ['', '', '', '', '', '', '', ''],
-        ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
-        ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
-    ])
-    move_history: List[str] = field(default_factory=list)
-    start_time: float = field(default_factory=time.time)
-    is_active: bool = True
-    winner: Optional[int] = None
-
-class ChessManager:
-    def __init__(self):
-        self.games: Dict[str, ChessGame] = {}
-        self.game_counter = 1
+        return "❌ Неизвестная команда"
     
-    def create_game(self, white_player: int, black_player: int) -> str:
-        game_id = f"chess_{self.game_counter}"
-        self.game_counter += 1
+    def _process_poker_command(self, session: GameSession, command: str) -> str:
+        """Обработать команду в игре 'Покер'"""
+        if command == "create_table":
+            session.current_state = "create_table"
+            session.data["table_id"] = f"table_{int(time.time())}"
+            session.data["players"] = [session.user_id]
+            session.data["pot"] = 0
+            session.data["chips"] = 1000
+            return "🃏 Стол создан! Ожидание игроков..."
         
-        game = ChessGame(
-            game_id=game_id,
-            white_player=white_player,
-            black_player=black_player,
-            current_turn=white_player
-        )
+        elif command == "start_game":
+            session.current_state = "playing"
+            return "🎮 Игра началась! Твой ход!"
         
-        self.games[game_id] = game
-        return f"♟️ Шахматная партия создана!\n\nБелые: {white_player}\nЧёрные: {black_player}\n\nХод белых. Отправьте ход в формате 'e2e4'"
+        elif command == "bet":
+            session.current_state = "bet"
+            return "💰 Введи сумму ставки..."
+        
+        elif command == "call":
+            session.current_state = "playing"
+            session.data["chips"] -= 50
+            session.data["pot"] += 50
+            return "✅ Ставка уравнена!"
+        
+        elif command == "fold":
+            session.current_state = "game_over"
+            session.is_active = False
+            return "❌ Карты сброшены. Игра окончена."
+        
+        elif command == "check":
+            session.current_state = "playing"
+            return "🤝 Пас. Ход переходит к следующему игроку."
+        
+        elif command == "continue":
+            session.current_state = "playing"
+            return "➡️ Продолжаем игру!"
+        
+        elif command == "cancel":
+            session.current_state = "playing"
+            return "❌ Действие отменено."
+        
+        elif command == "new_game":
+            session.current_state = "welcome"
+            session.data.clear()
+            session.is_active = True
+            return "🔄 Новая игра готова!"
+        
+        elif command == "back":
+            session.current_state = "welcome"
+            return "⬅️ Возвращаемся в главное меню"
+        
+        return "❌ Неизвестная команда"
     
-    def make_move(self, game_id: str, player_id: int, move: str) -> str:
-        if game_id not in self.games:
-            return "❌ Игра не найдена"
+    def _get_state_message(self, session_id: str) -> Tuple[str, List[Dict[str, str]]]:
+        """Получить сообщение и кнопки для текущего состояния"""
+        session = self.sessions[session_id]
+        game_type = session.game_type
+        current_state = session.current_state
         
-        game = self.games[game_id]
-        if not game.is_active:
-            return "❌ Игра завершена"
+        if game_type not in self.games or current_state not in self.games[game_type]:
+            return "❌ Состояние игры не найдено.", []
         
-        if player_id != game.current_turn:
-            return "❌ Не ваш ход"
+        state = self.games[game_type][current_state]
         
-        # Улучшенная валидация хода
-        if len(move) != 4 or not move.isalpha():
-            return "❌ Неверный формат хода. Используйте 'e2e4'"
+        # Формируем описание с подстановкой данных
+        description = state.description
+        if game_type == "conductor" and current_state == "on_duty":
+            description = description.format(
+                current_train=session.data.get("current_train", 1),
+                total_trains=session.data.get("total_trains", 5)
+            )
+        elif game_type == "hangman" and current_state == "playing":
+            description = description.format(
+                word_display=session.data.get("word_display", "_____")
+            )
+        elif game_type == "poker" and current_state == "playing":
+            description = description.format(
+                pot=session.data.get("pot", 0),
+                chips=session.data.get("chips", 1000)
+            )
         
-        # Проверяем корректность координат
-        from_pos, to_pos = move[:2], move[2:]
-        if not (from_pos[0] in 'abcdefgh' and from_pos[1] in '12345678' and 
-                to_pos[0] in 'abcdefgh' and to_pos[1] in '12345678'):
-            return "❌ Неверные координаты. Используйте буквы a-h и цифры 1-8"
+        # Формируем прогресс-бар
+        progress_text = ""
+        if state.show_progress_bar:
+            if game_type == "conductor":
+                current = session.data.get("current_train", 1)
+                total = session.data.get("total_trains", 5)
+                progress = int((current / total) * 100)
+                progress_text = f"\n\n📊 Прогресс: [{('█' * (progress // 20)).ljust(5, '░')}] {progress}%"
+            elif game_type == "hangman":
+                wrong = session.data.get("wrong_guesses", 0)
+                progress = int((wrong / 6) * 100)
+                progress_text = f"\n\n📊 Прогресс: [{('█' * (progress // 20)).ljust(5, '░')}] {progress}%"
         
-        # Добавляем ход в историю
-        game.move_history.append(move)
+        # Формируем кнопки
+        buttons = []
+        for action in state.actions:
+            buttons.append({
+                "label": f"{action.emoji} {action.label}",
+                "command": f"/game {game_type} {action.command}"
+            })
         
-        # Передаём ход
-        game.current_turn = game.black_player if game.current_turn == game.white_player else game.white_player
+        # Формируем итоговое сообщение
+        message = f"{state.title}\n\n{description}{progress_text}"
         
-        # Проверяем условия завершения игры
-        if len(game.move_history) >= 20:
-            game.is_active = False
-            game.winner = player_id
-            duration = int(time.time() - game.start_time)
-            
-            # Интеграция с экономикой
-            try:
-                from economy_social import economy_manager
-                economy_manager.add_money(player_id, 50)  # 50 монет за победу
-            except Exception:
-                pass
-            
-            return f"♟️ Игра завершена!\n🏆 Победитель: {game.winner}\n📊 Ходов: {len(game.move_history)}\n⏱️ Время: {duration} сек\n🪙 Получено монет: 50"
+        if state.progress_text:
+            progress_text = state.progress_text
+            if game_type == "conductor":
+                progress_text = progress_text.format(
+                    current_train=session.data.get("current_train", 1),
+                    total_trains=session.data.get("total_trains", 5)
+                )
+            elif game_type == "hangman":
+                progress_text = progress_text.format(
+                    wrong_guesses=session.data.get("wrong_guesses", 0)
+                )
+            elif game_type == "poker":
+                progress_text = progress_text.format(
+                    pot=session.data.get("pot", 0),
+                    chips=session.data.get("chips", 1000)
+                )
+            message += f"\n\n{progress_text}"
         
-        # Показываем текущую позицию
-        board_str = self.get_board(game_id)
-        return f"✅ Ход {move} сделан!\nХод {'чёрных' if game.current_turn == game.black_player else 'белых'}\n\n{board_str}"
-    
-    def get_board(self, game_id: str) -> str:
-        if game_id not in self.games:
-            return "❌ Игра не найдена"
-        
-        game = self.games[game_id]
-        board_str = "♟️ Текущая позиция:\n\n"
-        
-        for i, row in enumerate(game.board):
-            board_str += f"{8-i} "
-            for piece in row:
-                if piece == '':
-                    board_str += "· "
-                else:
-                    board_str += f"{piece} "
-            board_str += "\n"
-        
-        board_str += "  a b c d e f g h"
-        return board_str
-
-# -------- Кроссворды --------
-@dataclass
-class CrosswordGame:
-    game_id: str
-    player_id: int
-    words: List[Dict[str, str]]  # [{"word": "ПРИВЕТ", "clue": "Приветствие", "solved": False}]
-    current_word_index: int = 0
-    score: int = 0
-    start_time: float = field(default_factory=time.time)
-    is_active: bool = True
-
-class CrosswordManager:
-    def __init__(self):
-        self.games: Dict[int, CrosswordGame] = {}
-        self.word_sets = [
-            [
-                {"word": "ПРИВЕТ", "clue": "Приветствие на русском"},
-                {"word": "МАШИНА", "clue": "Транспортное средство"},
-                {"word": "КОМПЬЮТЕР", "clue": "Электронное устройство для работы"},
-                {"word": "ПРОГРАММИРОВАНИЕ", "clue": "Создание программ для компьютера"}
-            ],
-            [
-                {"word": "ИГРА", "clue": "Развлечение для детей и взрослых"},
-                {"word": "МУЗЫКА", "clue": "Искусство звуков"},
-                {"word": "КНИГА", "clue": "Печатное издание с текстом"},
-                {"word": "ПРИРОДА", "clue": "Окружающий мир"}
-            ]
-        ]
-    
-    def start_game(self, player_id: int) -> str:
-        if player_id in self.games:
-            return "❌ У вас уже есть активная игра"
-        
-        word_set = random.choice(self.word_sets)
-        game = CrosswordGame(
-            game_id=f"crossword_{player_id}_{int(time.time())}",
-            player_id=player_id,
-            words=word_set.copy()
-        )
-        
-        self.games[player_id] = game
-        
-        return f"📝 Кроссворд начат!\n\nСлово 1: {game.words[0]['clue']}\n\nОтправьте ответ:"
-    
-    def guess_word(self, player_id: int, guess: str) -> str:
-        if player_id not in self.games:
-            return "❌ Нет активной игры"
-        
-        game = self.games[player_id]
-        if not game.is_active:
-            return "❌ Игра завершена"
-        
-        current_word = game.words[game.current_word_index]
-        
-        if guess.upper() == current_word["word"]:
-            current_word["solved"] = True
-            
-            # Вычисляем очки за слово
-            word_length = len(current_word["word"])
-            base_score = word_length * 2  # 2 очка за букву
-            time_bonus = max(0, 30 - (time.time() - game.start_time) // 10)  # Бонус за скорость
-            
-            word_score = base_score + time_bonus
-            game.score += word_score
-            game.current_word_index += 1
-            
-            if game.current_word_index >= len(game.words):
-                # Игра завершена
-                game.is_active = False
-                duration = int(time.time() - game.start_time)
-                
-                # Финальные бонусы
-                completion_bonus = 50  # Бонус за завершение
-                speed_bonus = max(0, 100 - duration // 10)  # Бонус за общую скорость
-                final_score = game.score + completion_bonus + speed_bonus
-                
-                result = f"🎉 Кроссворд решён!\n\n"
-                result += f"📊 Результаты:\n"
-                result += f"💰 Очки: {final_score}\n"
-                result += f"⏱️ Время: {duration} сек\n"
-                result += f"📝 Слов отгадано: {len(game.words)}\n"
-                result += f"🏆 Бонус за завершение: +{completion_bonus}\n"
-                result += f"⚡ Бонус за скорость: +{speed_bonus}\n\n"
-                result += f"Все слова отгаданы!"
-                
-                # Интеграция с экономикой
-                try:
-                    from economy_social import economy_manager
-                    economy_manager.add_money(player_id, final_score // 15)  # ~6.7% от очков в монеты
-                    result += f"\n🪙 Получено монет: {final_score // 15}"
-                except Exception:
-                    pass
-                
-                # Очищаем игру
-                del self.games[player_id]
-                
-                return result
-            else:
-                next_word = game.words[game.current_word_index]
-                return f"✅ Правильно! +{word_score} очков\n\nСлово {game.current_word_index + 1}: {next_word['clue']}\n\nОтправьте ответ:"
-        else:
-            # Подсказки для неправильного ответа
-            hint = self._get_hint(current_word["word"], guess)
-            return f"❌ Неправильно. Попробуйте ещё раз.\n\nПодсказка: {current_word['clue']}\n💡 {hint}"
-    
-    def _get_hint(self, correct_word: str, guess: str) -> str:
-        """Генерирует подсказку на основе неправильного ответа"""
-        if len(guess) != len(correct_word):
-            return f"Слово состоит из {len(correct_word)} букв"
-        
-        # Показываем правильные буквы на правильных позициях
-        correct_positions = sum(1 for i, (c1, c2) in enumerate(zip(guess.upper(), correct_word)) if c1 == c2)
-        if correct_positions > 0:
-            return f"Правильных букв на месте: {correct_positions}"
-        
-        # Показываем общие буквы
-        common_letters = set(guess.upper()) & set(correct_word)
-        if common_letters:
-            return f"Общие буквы: {', '.join(sorted(common_letters))}"
-        
-        return "Попробуйте другое слово"
-
-# -------- Покер --------
-class PokerHand(Enum):
-    HIGH_CARD = "старшая карта"
-    PAIR = "пара"
-    TWO_PAIR = "две пары"
-    THREE_OF_KIND = "тройка"
-    STRAIGHT = "стрит"
-    FLUSH = "флеш"
-    FULL_HOUSE = "фулл-хаус"
-    FOUR_OF_KIND = "каре"
-    STRAIGHT_FLUSH = "стрит-флеш"
-    ROYAL_FLUSH = "роял-флеш"
+        return message, buttons
 
 
-@dataclass
-class Card:
-    suit: str
-    rank: str
-    value: int
-
-
-@dataclass
-class PokerPlayer:
-    user_id: int
-    name: str
-    chips: int = 1000
-    hand: List[Card] = field(default_factory=list)
-    bet: int = 0
-    folded: bool = False
-    is_all_in: bool = False
-
-
-@dataclass
-class PokerGame:
-    peer_id: int
-    players: Dict[int, PokerPlayer] = field(default_factory=dict)
-    deck: List[Card] = field(default_factory=list)
-    pot: int = 0
-    current_bet: int = 0
-    dealer: int = 0
-    is_active: bool = False
-    round: str = "preflop"  # preflop, flop, turn, river
-    community_cards: List[Card] = field(default_factory=list)
-
-
-class PokerGameManager:
-    def __init__(self):
-        self.games: Dict[int, PokerGame] = {}
-        self.suits = ["♠", "♥", "♦", "♣"]
-        self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-    
-    def create_game(self, peer_id: int, creator_id: int, creator_name: str) -> str:
-        if peer_id in self.games:
-            return "❌ Игра уже идёт в этом чате"
-        
-        game = PokerGame(peer_id=peer_id)
-        game.players[creator_id] = PokerPlayer(user_id=creator_id, name=creator_name)
-        game.is_active = True
-        self.games[peer_id] = game
-        
-        return (
-            f"🃏 Покер-стол создан!\n"
-            f"👤 Игрок: {creator_name}\n"
-            f"💰 Фишки: 1000\n\n"
-            f"Другие игроки могут присоединиться командой /poker join"
-        )
-    
-    def join_game(self, peer_id: int, user_id: int, name: str) -> str:
-        if peer_id not in self.games:
-            return "❌ Игра не создана. Создайте игру командой /poker create"
-        
-        game = self.games[peer_id]
-        if user_id in game.players:
-            return "❌ Вы уже в игре"
-        
-        if len(game.players) >= 8:
-            return "❌ Максимум 8 игроков"
-        
-        game.players[user_id] = PokerPlayer(user_id=user_id, name=name)
-        
-        result = f"✅ {name} присоединился к игре!\n"
-        result += f"👥 Игроков: {len(game.players)}\n"
-        result += f"💰 Фишки: 1000\n\n"
-        
-        if len(game.players) >= 2:
-            result += "🎮 Игра готова к началу!\n"
-            result += "Команда: /poker start"
-        else:
-            result += "⏳ Ожидание игроков... (нужно минимум 2)"
-        
-        return result
-    
-    def start_game(self, peer_id: int) -> str:
-        if peer_id not in self.games:
-            return "❌ Игра не найдена"
-        
-        game = self.games[peer_id]
-        if len(game.players) < 2:
-            return "❌ Недостаточно игроков. Нужно минимум 2"
-        
-        # Начинаем игру
-        game.is_active = True
-        game.round = "preflop"
-        game.deal_cards()
-        
-        # Определяем дилера и первого игрока
-        player_ids = list(game.players.keys())
-        game.dealer = player_ids[0]
-        game.current_player = player_ids[1] if len(player_ids) > 1 else player_ids[0]
-        
-        result = "🎮 Покер начался!\n\n"
-        result += f"Дилер: {game.players[game.dealer].name}\n"
-        result += f"Текущий игрок: {game.players[game.current_player].name}\n"
-        result += f"Фаза: {game.round}\n"
-        result += f"Банк: {game.pot} 🪙\n\n"
-        result += "Доступные действия:\n"
-        result += "• /poker bet <сумма> - сделать ставку\n"
-        result += "• /poker call - уравнять ставку\n"
-        result += "• /poker fold - сбросить карты\n"
-        result += "• /poker check - пас (если нет ставок)\n"
-        result += "• /poker show - показать карты\n"
-        
-        return result
-    
-    def deal_cards(self, peer_id: int) -> str:
-        """Раздача карт"""
-        if peer_id not in self.games:
-            return "❌ Игра не найдена"
-        
-        game = self.games[peer_id]
-        
-        # Создаем колоду
-        game.deck = []
-        for suit in self.suits:
-            for rank in self.ranks:
-                game.deck.append(Card(suit=suit, rank=rank))
-        
-        # Перемешиваем
-        random.shuffle(game.deck)
-        
-        # Раздаем по 2 карты каждому игроку
-        for player in game.players.values():
-            player.cards = [game.deck.pop(), game.deck.pop()]
-        
-        return "🃏 Карты разданы!"
-    
-    def make_action(self, peer_id: int, player_id: int, action: str, amount: int = 0) -> str:
-        """Выполнение действия в покере"""
-        if peer_id not in self.games:
-            return "❌ Игра не найдена"
-        
-        game = self.games[peer_id]
-        if not game.is_active:
-            return "❌ Игра не активна"
-        
-        if player_id != game.current_player:
-            return "❌ Не ваш ход"
-        
-        player = game.players[player_id]
-        
-        if action == "fold":
-            player.folded = True
-            result = f"❌ {player.name} сбросил карты"
-        elif action == "check":
-            if game.current_bet > 0:
-                return "❌ Нельзя пасовать при наличии ставок"
-            result = f"✅ {player.name} пасует"
-        elif action == "call":
-            if game.current_bet == 0:
-                return "❌ Нет ставок для уравнивания"
-            if player.chips < game.current_bet:
-                return "❌ Недостаточно фишек"
-            player.chips -= game.current_bet
-            game.pot += game.current_bet
-            result = f"✅ {player.name} уравнял ставку {game.current_bet} 🪙"
-        elif action == "bet":
-            if amount <= game.current_bet:
-                return "❌ Ставка должна быть больше текущей"
-            if player.chips < amount:
-                return "❌ Недостаточно фишек"
-            player.chips -= amount
-            game.pot += amount
-            game.current_bet = amount
-            result = f"💰 {player.name} поставил {amount} 🪙"
-        else:
-            return "❌ Неизвестное действие"
-        
-        # Передаем ход следующему игроку
-        self._next_player(game)
-        
-        return result
-    
-    def _next_player(self, game: PokerGame) -> None:
-        """Переход к следующему игроку"""
-        player_ids = [pid for pid, player in game.players.items() if not player.folded]
-        
-        if len(player_ids) <= 1:
-            # Игра завершена
-            self._end_game(game)
-            return
-        
-        current_index = player_ids.index(game.current_player)
-        next_index = (current_index + 1) % len(player_ids)
-        game.current_player = player_ids[next_index]
-
-
-# -------- Шахматы --------
-class ChessPiece(Enum):
-    PAWN = "♟"
-    ROOK = "♜"
-    KNIGHT = "♞"
-    BISHOP = "♝"
-    QUEEN = "♛"
-    KING = "♚"
-
-
-@dataclass
-class ChessMove:
-    from_pos: str
-    to_pos: str
-    piece: ChessPiece
-    is_capture: bool = False
-    is_check: bool = False
-    is_checkmate: bool = False
-
-
-@dataclass
-class ChessGame:
-    peer_id: int
-    white_player: int
-    black_player: int
-    current_turn: int
-    board: List[List[Optional[Tuple[ChessPiece, bool]]]] = field(default_factory=list)  # (piece, is_white)
-    move_history: List[ChessMove] = field(default_factory=list)
-    is_active: bool = False
-    winner: Optional[int] = None
-
-
-# -------- Виселица --------
-@dataclass
-class HangmanGame:
-    peer_id: int
-    word: str
-    guessed_letters: Set[str] = field(default_factory=set)
-    wrong_guesses: int = 0
-    max_wrong: int = 6
-    is_active: bool = False
-    start_time: float = field(default_factory=time.time)
-
-
-class HangmanManager:
-    def __init__(self):
-        self.games: Dict[int, HangmanGame] = {}
-        self.words = [
-            "программирование", "компьютер", "алгоритм", "база данных",
-            "интернет", "сервер", "клиент", "функция", "переменная",
-            "массив", "объект", "класс", "метод", "интерфейс"
-        ]
-    
-    def start_game(self, peer_id: int) -> str:
-        if peer_id in self.games:
-            return "❌ Игра уже идёт в этом чате"
-        
-        word = random.choice(self.words)
-        game = HangmanGame(peer_id=peer_id, word=word, is_active=True)
-        self.games[peer_id] = game
-        
-        return (
-            f"🎯 Виселица началась!\n\n"
-            f"Слово: {'_' * len(word)}\n"
-            f"Букв: {len(word)}\n"
-            f"Ошибок: 0/{game.max_wrong}\n\n"
-            f"Угадывайте буквы по одной!"
-        )
-    
-    def guess_letter(self, peer_id: int, letter: str) -> str:
-        if peer_id not in self.games:
-            return "❌ Игра не запущена"
-        
-        game = self.games[peer_id]
-        if not game.is_active:
-            return "❌ Игра завершена"
-        
-        letter = letter.lower()
-        if len(letter) != 1:
-            return "❌ Угадывайте по одной букве"
-        
-        if letter in game.guessed_letters:
-            return "❌ Эта буква уже была"
-        
-        game.guessed_letters.add(letter)
-        
-        if letter in game.word:
-            # Правильная буква
-            if self._is_word_guessed(game):
-                return self._end_game(game, True)
-            else:
-                return self._get_game_status(game)
-        else:
-            # Неправильная буква
-            game.wrong_guesses += 1
-            if game.wrong_guesses >= game.max_wrong:
-                return self._end_game(game, False)
-            else:
-                return self._get_game_status(game)
-    
-    def _is_word_guessed(self, game: HangmanGame) -> bool:
-        return all(letter in game.guessed_letters for letter in game.word)
-    
-    def _get_game_status(self, game: HangmanGame) -> str:
-        display_word = ""
-        for letter in game.word:
-            if letter in game.guessed_letters:
-                display_word += letter
-            else:
-                display_word += "_"
-        
-        return (
-            f"🎯 Слово: {display_word}\n"
-            f"Угаданные буквы: {', '.join(sorted(game.guessed_letters))}\n"
-            f"Ошибок: {game.wrong_guesses}/{game.max_wrong}\n"
-            f"Осталось попыток: {game.max_wrong - game.wrong_guesses}"
-        )
-    
-    def _end_game(self, game: HangmanGame, won: bool) -> str:
-        game.is_active = False
-        
-        # Вычисляем очки
-        duration = int(time.time() - game.start_time)
-        base_score = 100 if won else 10
-        time_bonus = max(0, 60 - duration)  # Бонус за скорость
-        accuracy_bonus = max(0, 50 - game.wrong_guesses * 10)  # Бонус за точность
-        
-        total_score = base_score + time_bonus + accuracy_bonus
-        
-        if won:
-            result = f"🎉 Поздравляем! Слово угадано: {game.word}\n\n"
-            result += f"📊 Результаты:\n"
-            result += f"💰 Очки: {total_score}\n"
-            result += f"⏱️ Время: {duration} сек\n"
-            result += f"🎯 Ошибок: {game.wrong_guesses}\n"
-            result += f"⚡ Бонус за скорость: +{time_bonus}\n"
-            result += f"🎯 Бонус за точность: +{accuracy_bonus}"
-        else:
-            result = f"💀 Игра окончена! Слово было: {game.word}\n\n"
-            result += f"📊 Результаты:\n"
-            result += f"💰 Очки: {total_score}\n"
-            result += f"⏱️ Время: {duration} сек\n"
-            result += f"🎯 Ошибок: {game.wrong_guesses}"
-        
-        # Интеграция с экономикой
-        try:
-            from economy_social import economy_manager
-            economy_manager.add_money(game.peer_id, total_score // 20)  # 5% от очков в монеты
-            result += f"\n🪙 Получено монет: {total_score // 20}"
-        except Exception:
-            pass
-        
-        # Очищаем игру
-        del self.games[game.peer_id]
-        
-        return result
-
-
-# Глобальные экземпляры игр
-conductor_game = ConductorGame()
-poker_manager = PokerGameManager()
-hangman_manager = HangmanManager()
-chess_manager = ChessManager()
-crossword_manager = CrosswordManager()
+# Глобальный экземпляр движка игр
+game_engine = GameEngine()

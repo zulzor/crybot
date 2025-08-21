@@ -574,11 +574,95 @@ def _handle_help(ctx: RouterContext) -> Optional[str]:
 
 
 # -------- Новые команды для игр --------
+def _handle_game(ctx: RouterContext) -> Optional[str]:
+    """Универсальный обработчик игр"""
+    from games_extended import game_engine
+    
+    parts = ctx.text.strip().split()
+    if len(parts) < 2:
+        return "❌ Использование: /game <тип> <действие>\n\nДоступные игры:\n• conductor - Проводница РЖД\n• hangman - Виселица\n• poker - Покер"
+    
+    game_type = parts[0]
+    command = parts[1]
+    
+    if game_type not in ["conductor", "hangman", "poker"]:
+        return "❌ Неизвестная игра. Доступные: conductor, hangman, poker"
+    
+    # Обрабатываем действие
+    message, buttons = game_engine.handle_action(ctx.user_id, ctx.peer_id, game_type, command)
+    
+    # Отправляем сообщение с inline-кнопками
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:  # Переход на новую строку каждые 2 кнопки
+                keyboard.add_line()
+        
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
+    
+    return None
+
 def _handle_conductor(ctx: RouterContext) -> Optional[str]:
-    """Обработчик игры Проводница РЖД"""
-    from games_extended import conductor_game
-    text = conductor_game.start_session(ctx.peer_id, ctx.user_id)
-    _send_with_keyboard(ctx, text, _build_conductor_inline_keyboard())
+    """Обработчик игры 'Проводница РЖД'"""
+    from games_extended import game_engine
+    
+    message, buttons = game_engine.start_game(ctx.user_id, ctx.peer_id, "conductor")
+    
+    # Отправляем сообщение с inline-кнопками
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:  # Переход на новую строку каждые 2 кнопки
+                keyboard.add_line()
+        
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
+    
+    return None
+
+def _handle_hangman(ctx: RouterContext) -> Optional[str]:
+    """Обработчик игры 'Виселица'"""
+    from games_extended import game_engine
+    
+    message, buttons = game_engine.start_game(ctx.user_id, ctx.peer_id, "hangman")
+    
+    # Отправляем сообщение с inline-кнопками
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:  # Переход на новую строку каждые 2 кнопки
+                keyboard.add_line()
+        
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
+    
+    return None
+
+def _handle_poker(ctx: RouterContext) -> Optional[str]:
+    """Обработчик игры 'Покер'"""
+    from games_extended import game_engine
+    
+    message, buttons = game_engine.start_game(ctx.user_id, ctx.peer_id, "poker")
+    
+    # Отправляем сообщение с inline-кнопками
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:  # Переход на новую строку каждые 2 кнопки
+                keyboard.add_line()
+        
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
+    
     return None
 
 def _handle_conductor_action(ctx: RouterContext) -> Optional[str]:
@@ -588,11 +672,6 @@ def _handle_conductor_action(ctx: RouterContext) -> Optional[str]:
     text = conductor_game.handle_action(ctx.peer_id, action)
     _send_with_keyboard(ctx, text, _build_conductor_inline_keyboard())
     return None
-
-def _handle_hangman(ctx: RouterContext) -> Optional[str]:
-    """Обработчик игры Виселица"""
-    from games_extended import hangman_manager
-    return hangman_manager.start_game(ctx.peer_id)
 
 def _handle_hangman_guess(ctx: RouterContext) -> Optional[str]:
     """Обработчик угадывания букв в Виселице"""
@@ -1060,13 +1139,96 @@ def _register_builtin_commands() -> None:
         )
     )
 
+    # Основные команды
+    register_command(
+        Command(
+            name="/start",
+            aliases=["start", "начать"],
+            description="Главное меню бота",
+            handler=_handle_start,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/help",
+            aliases=["help", "помощь"],
+            description="Справка по командам",
+            handler=_handle_help,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/menu",
+            aliases=["menu", "меню"],
+            description="Главное меню",
+            handler=_handle_start,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/games",
+            aliases=["games", "игры"],
+            description="Меню игр",
+            handler=_handle_games_menu,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/economy",
+            aliases=["economy", "экономика"],
+            description="Меню экономики",
+            handler=_handle_economy_menu,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/social",
+            aliases=["social", "социальное"],
+            description="Меню социальных функций",
+            handler=_handle_social_menu,
+            admin_required=False,
+        )
+    )
+
     # Новые игры
     register_command(
         Command(
+            name="/game",
+            aliases=["game", "игра"],
+            description="Универсальная команда для игр: /game <тип> <действие>",
+            handler=_handle_game,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
             name="/conductor",
-            aliases=["conductor", "проводница", "ржд"],
+            aliases=["conductor", "проводница"],
             description="Игра 'Проводница РЖД'",
             handler=_handle_conductor,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/hangman",
+            aliases=["hangman", "виселица"],
+            description="Игра 'Виселица'",
+            handler=_handle_hangman,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker",
+            aliases=["poker", "покер"],
+            description="Игра 'Покер'",
+            handler=_handle_poker,
             admin_required=False,
         )
     )
@@ -1447,4 +1609,129 @@ def _register_builtin_commands() -> None:
 
 # Инициализация регистра при импорте модуля
 _register_builtin_commands()
+
+
+def _handle_start(ctx: RouterContext) -> Optional[str]:
+    """Главное меню бота"""
+    message = """🎮 **CryBot** — игровой бот для ВКонтакте
+
+Привет! Я бот с играми, экономикой и социальными функциями.
+
+**🎯 Что умею:**
+• 🚂 Проводница РЖД — помоги пассажирам
+• 🎯 Виселица — угадай слово по буквам  
+• 🃏 Покер — карточная игра
+• 💰 Экономика — магазин, крафтинг, аукционы
+• 👥 Социальное — друзья, кланы, браки
+
+Выбери, что хочешь сделать:"""
+
+    # Создаем inline-клавиатуру
+    keyboard = VkKeyboard(inline=True)
+    
+    # Первый ряд: Игры
+    keyboard.add_button("🎮 Игры", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("💰 Экономика", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    
+    # Второй ряд: Социальное и Профиль
+    keyboard.add_button("👥 Социальное", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("👤 Профиль", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    
+    # Третий ряд: Помощь и Настройки
+    keyboard.add_button("❓ Помощь", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("⚙️ Настройки", color=VkKeyboardColor.SECONDARY)
+    
+    _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
+
+def _handle_games_menu(ctx: RouterContext) -> Optional[str]:
+    """Меню игр"""
+    message = """🎮 **Игры**
+
+Выбери игру для начала:
+
+**🚂 Проводница РЖД**
+Помоги пассажирам и проверь билеты. 5 поездов за смену!
+
+**🎯 Виселица**  
+Угадай слово по буквам. Максимум 6 ошибок!
+
+**🃏 Покер**
+Карточная игра с фишками и ставками."""
+
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🚂 Проводница РЖД", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🎯 Виселица", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🃏 Покер", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
+    
+    _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
+
+def _handle_economy_menu(ctx: RouterContext) -> Optional[str]:
+    """Меню экономики"""
+    from economy_social import economy_manager, Currency
+    
+    wallet = economy_manager.get_wallet(ctx.user_id)
+    balance = wallet.balance.get(Currency.CRYCOIN, 0)
+    
+    message = f"""💰 **Экономика**
+
+Твой баланс: **{balance} 🪙**
+
+**🛒 Магазин** — покупай предметы и бустеры
+**🔨 Крафтинг** — создавай предметы из материалов  
+**🏷️ Аукционы** — торгуйся за редкие вещи
+**🏆 Турниры** — участвуй в соревнованиях
+**📊 Рейтинги** — смотри топ игроков"""
+
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🛒 Магазин", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🔨 Крафтинг", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🏷️ Аукционы", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🏆 Турниры", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("📊 Рейтинги", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("💰 Баланс", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
+    
+    _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
+
+def _handle_social_menu(ctx: RouterContext) -> Optional[str]:
+    """Меню социальных функций"""
+    from economy_social import social_manager
+    
+    profile = social_manager.get_profile(ctx.user_id)
+    
+    message = f"""👥 **Социальное**
+
+**👤 Профиль:** {profile.name}
+**💕 Статус:** {profile.relationship_status.value}
+**👥 Друзей:** {len(profile.friends)}
+**🏰 Клан:** {'Да' if profile.clan_id else 'Нет'}
+
+**👥 Друзья** — добавляй и общайся
+**🏰 Кланы** — создавай и присоединяйся
+**💍 Браки** — предложи руку и сердце
+**🏆 Достижения** — смотри свои награды"""
+
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("👥 Друзья", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🏰 Кланы", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("💍 Браки", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("🏆 Достижения", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
+    
+    _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
 
