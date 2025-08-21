@@ -1317,17 +1317,8 @@ def _register_builtin_commands() -> None:
         Command(
             name="/chess",
             aliases=["chess", "шахматы"],
-            description="Создать шахматную партию",
+            description="Игра 'Шахматы'",
             handler=_handle_chess,
-            admin_required=False,
-        )
-    )
-    register_command(
-        Command(
-            name="/chess move",
-            aliases=["chess move", "шахматы ход"],
-            description="Сделать ход в шахматах: /chess move <game_id> <move>",
-            handler=_handle_chess_move,
             admin_required=False,
         )
     )
@@ -1335,17 +1326,8 @@ def _register_builtin_commands() -> None:
         Command(
             name="/crossword",
             aliases=["crossword", "кроссворд"],
-            description="Начать кроссворд",
+            description="Игра 'Кроссворды'",
             handler=_handle_crossword,
-            admin_required=False,
-        )
-    )
-    register_command(
-        Command(
-            name="/crossword guess",
-            aliases=["crossword guess", "кроссворд угадать"],
-            description="Угадать слово в кроссворде: /crossword guess <слово>",
-            handler=_handle_crossword_guess,
             admin_required=False,
         )
     )
@@ -1733,5 +1715,33 @@ def _handle_social_menu(ctx: RouterContext) -> Optional[str]:
     keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
     
     _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
+
+def _handle_chess(ctx: RouterContext) -> Optional[str]:
+    from games_extended import game_engine
+    message, buttons = game_engine.start_game(ctx.user_id, ctx.peer_id, "chess")
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:
+                keyboard.add_line()
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
+    return None
+
+def _handle_crossword(ctx: RouterContext) -> Optional[str]:
+    from games_extended import game_engine
+    message, buttons = game_engine.start_game(ctx.user_id, ctx.peer_id, "crossword")
+    if buttons:
+        keyboard = VkKeyboard(inline=True)
+        for i, button in enumerate(buttons):
+            keyboard.add_button(button["label"], color=VkKeyboardColor.PRIMARY)
+            if i % 2 == 1:
+                keyboard.add_line()
+        _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    else:
+        _send_with_keyboard(ctx, message, None)
     return None
 

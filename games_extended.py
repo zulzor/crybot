@@ -54,6 +54,8 @@ class GameEngine:
         self._init_conductor_game()
         self._init_hangman_game()
         self._init_poker_game()
+        self._init_chess_game()
+        self._init_crossword_game()
     
     def _init_conductor_game(self):
         """Инициализация игры 'Проводница РЖД'"""
@@ -315,7 +317,199 @@ class GameEngine:
             return self._process_hangman_command(session, command)
         elif game_type == "poker":
             return self._process_poker_command(session, command)
+        elif game_type == "chess":
+            return self._process_chess_command(session, command)
+        elif game_type == "crossword":
+            return self._process_crossword_command(session, command)
         
+        return "❌ Неизвестная команда"
+
+    def _init_chess_game(self):
+        """Инициализация игры 'Шахматы' (упрощённая в шаблоне)"""
+        self.games["chess"] = {
+            "welcome": GameState(
+                state_id="welcome",
+                title="♟️ Шахматы",
+                description="Привет! Это 'Шахматы' — выбери цвет и начни партию.",
+                actions=[
+                    GameAction("Играть белыми", "♟", "playing", "start_white"),
+                    GameAction("Играть чёрными", "♞", "playing", "start_black"),
+                    GameAction("Правила", "📖", "rules", "show_rules"),
+                ],
+            ),
+            "rules": GameState(
+                state_id="rules",
+                title="📖 Правила шахмат (кратко)",
+                description="""Цель: поставить мат королю соперника.
+Ходы по правилам шахмат. В шаблоне — упрощённая логика ходов.
+Игра заканчивается через 20 ходов или по сдаче.""",
+                actions=[
+                    GameAction("Назад", "⬅️", "welcome", "back"),
+                ],
+            ),
+            "playing": GameState(
+                state_id="playing",
+                title="♟️ Шахматы",
+                description="Ход: {turn}. Ходов сделано: {moves}/20.",
+                actions=[
+                    GameAction("Сделать ход", "➡️", "move", "make_move"),
+                    GameAction("Сдаться", "🏳️", "game_over", "resign"),
+                ],
+                progress_text="Ходы: {moves}/20",
+                show_progress_bar=True,
+            ),
+            "move": GameState(
+                state_id="move",
+                title="➡️ Ход выполнен",
+                description="Ход записан. Следующий ход — {turn}.",
+                actions=[
+                    GameAction("Продолжить", "➡️", "playing", "continue"),
+                    GameAction("Сдаться", "🏳️", "game_over", "resign"),
+                ],
+            ),
+            "game_over": GameState(
+                state_id="game_over",
+                title="🏁 Партия завершена",
+                description="Итог: победитель — {winner}. Ходов: {moves}.",
+                actions=[
+                    GameAction("Новая партия", "🔄", "welcome", "new_game"),
+                    GameAction("В главное меню", "🏠", "welcome", "back"),
+                ],
+            ),
+        }
+
+    def _process_chess_command(self, session: GameSession, command: str) -> str:
+        if command in ("start_white", "start_black"):
+            session.current_state = "playing"
+            session.data["turn"] = "белые"
+            session.data["moves"] = 0
+            session.data["winner"] = "—"
+            return "♟️ Партия начата! Ход белых."
+        elif command == "make_move":
+            session.data["moves"] = session.data.get("moves", 0) + 1
+            # меняем очередь хода
+            session.data["turn"] = "чёрные" if session.data.get("turn") == "белые" else "белые"
+            session.current_state = "move"
+            # условие завершения
+            if session.data["moves"] >= 20:
+                session.current_state = "game_over"
+                session.data["winner"] = random.choice(["белые", "чёрные"])
+                session.is_active = False
+                return "🏁 Партия завершена по лимиту ходов."
+            return "✅ Ход выполнен."
+        elif command == "resign":
+            session.current_state = "game_over"
+            session.data["winner"] = "соперник"
+            session.is_active = False
+            return "🏳️ Вы сдались."
+        elif command == "continue":
+            session.current_state = "playing"
+            return "➡️ Продолжаем партию."
+        elif command in ("new_game", "back"):
+            session.current_state = "welcome"
+            session.data.clear()
+            session.is_active = True
+            return "🔄 Готово к новой партии."
+        return "❌ Неизвестная команда"
+
+    def _init_crossword_game(self):
+        """Инициализация игры 'Кроссворды' (шаблон)"""
+        self.games["crossword"] = {
+            "welcome": GameState(
+                state_id="welcome",
+                title="📝 Кроссворды",
+                description="Привет! Это 'Кроссворды' — отгадай все слова по подсказкам.",
+                actions=[
+                    GameAction("Начать", "📝", "playing", "start"),
+                    GameAction("Правила", "📖", "rules", "show_rules"),
+                ],
+            ),
+            "rules": GameState(
+                state_id="rules",
+                title="📖 Правила кроссвордов",
+                description="""Отгадывай слова по подсказкам. В шаблоне ответы фиксируются кнопкой.
+Заверши 5 слов, чтобы победить!""",
+                actions=[
+                    GameAction("Назад", "⬅️", "welcome", "back"),
+                ],
+            ),
+            "playing": GameState(
+                state_id="playing",
+                title="📝 Кроссворды",
+                description="Слово {index} из {total}. Подсказка: {clue}",
+                actions=[
+                    GameAction("Отгадать", "✅", "result", "guess_ok"),
+                    GameAction("Пропустить", "⏭️", "result", "guess_skip"),
+                    GameAction("Завершить", "🏁", "game_over", "finish"),
+                ],
+                progress_text="Слова: {index}/{total}",
+                show_progress_bar=True,
+            ),
+            "result": GameState(
+                state_id="result",
+                title="✅ Результат",
+                description="Ответ принят. Переходим к следующему слову.",
+                actions=[
+                    GameAction("Дальше", "➡️", "playing", "next"),
+                    GameAction("Завершить", "🏁", "game_over", "finish"),
+                ],
+            ),
+            "game_over": GameState(
+                state_id="game_over",
+                title="🏁 Игра завершена",
+                description="Отгадано слов: {solved}/{total}.",
+                actions=[
+                    GameAction("Новая игра", "🔄", "welcome", "new_game"),
+                    GameAction("В главное меню", "🏠", "welcome", "back"),
+                ],
+            ),
+        }
+
+    def _process_crossword_command(self, session: GameSession, command: str) -> str:
+        if command == "start":
+            session.current_state = "playing"
+            session.data["index"] = 1
+            session.data["total"] = 5
+            session.data["solved"] = 0
+            session.data["clue"] = random.choice([
+                "Столица России",
+                "Зимний вид осадков",
+                "Домашнее животное",
+                "Язык программирования",
+                "Единица информации",
+            ])
+            return "📝 Игра началась!"
+        elif command == "guess_ok":
+            session.current_state = "result"
+            session.data["solved"] = session.data.get("solved", 0) + 1
+            return "✅ Ответ зачтён."
+        elif command == "guess_skip":
+            session.current_state = "result"
+            return "⏭️ Пропуск."
+        elif command == "next":
+            session.data["index"] = session.data.get("index", 1) + 1
+            if session.data["index"] > session.data.get("total", 5):
+                session.current_state = "game_over"
+                session.is_active = False
+                return "🏁 Все слова обработаны."
+            session.current_state = "playing"
+            session.data["clue"] = random.choice([
+                "Морской транспорт",
+                "Музыкальный инструмент",
+                "Город на Неве",
+                "Мобильная ОС",
+                "Часть браузера",
+            ])
+            return "➡️ Следующее слово."
+        elif command == "finish":
+            session.current_state = "game_over"
+            session.is_active = False
+            return "🏁 Игра завершена пользователем."
+        elif command in ("new_game", "back"):
+            session.current_state = "welcome"
+            session.data.clear()
+            session.is_active = True
+            return "🔄 Новая игра готова!"
         return "❌ Неизвестная команда"
     
     def _process_conductor_command(self, session: GameSession, command: str) -> str:
@@ -500,6 +694,15 @@ class GameEngine:
                 wrong = session.data.get("wrong_guesses", 0)
                 progress = int((wrong / 6) * 100)
                 progress_text = f"\n\n📊 Прогресс: [{('█' * (progress // 20)).ljust(5, '░')}] {progress}%"
+            elif game_type == "chess":
+                moves = session.data.get("moves", 0)
+                progress = min(100, int((moves / 20) * 100))
+                progress_text = f"\n\n📊 Прогресс: [{('█' * (progress // 20)).ljust(5, '░')}] {progress}%"
+            elif game_type == "crossword":
+                idx = session.data.get("index", 1)
+                total = session.data.get("total", 5)
+                progress = int((idx - 1) / total * 100)
+                progress_text = f"\n\n📊 Прогресс: [{('█' * (progress // 20)).ljust(5, '░')}] {progress}%"
         
         # Формируем кнопки
         buttons = []
@@ -528,7 +731,30 @@ class GameEngine:
                     pot=session.data.get("pot", 0),
                     chips=session.data.get("chips", 1000)
                 )
+            elif game_type == "chess":
+                progress_text = progress_text.format(
+                    moves=session.data.get("moves", 0),
+                )
+            elif game_type == "crossword":
+                progress_text = progress_text.format(
+                    index=session.data.get("index", 1),
+                    total=session.data.get("total", 5),
+                )
             message += f"\n\n{progress_text}"
+
+        # Подстановка динамических полей в описания состояний
+        if game_type == "chess":
+            if "{turn}" in message:
+                message = message.replace("{turn}", session.data.get("turn", "белые"))
+            if "{moves}" in message:
+                message = message.replace("{moves}", str(session.data.get("moves", 0)))
+            if "{winner}" in message:
+                message = message.replace("{winner}", session.data.get("winner", "—"))
+        elif game_type == "crossword":
+            if "{index}" in message or "{total}" in message or "{clue}" in message:
+                message = message.replace("{index}", str(session.data.get("index", 1)))
+                message = message.replace("{total}", str(session.data.get("total", 5)))
+                message = message.replace("{clue}", session.data.get("clue", "Подсказка"))
         
         return message, buttons
 
