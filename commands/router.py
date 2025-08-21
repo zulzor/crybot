@@ -1597,34 +1597,14 @@ def _handle_start(ctx: RouterContext) -> Optional[str]:
     """Главное меню бота"""
     message = """🎮 **CryBot** — игровой бот для ВКонтакте
 
-Привет! Я бот с играми, экономикой и социальными функциями.
+Привет! Я бот с играми и ИИ-чатом. Чем займёмся?
 
-**🎯 Что умею:**
-• 🚂 Проводница РЖД — помоги пассажирам
-• 🎯 Виселица — угадай слово по буквам  
-• 🃏 Покер — карточная игра
-• 💰 Экономика — магазин, крафтинг, аукционы
-• 👥 Социальное — друзья, кланы, браки
+Выбери режим:"""
 
-Выбери, что хочешь сделать:"""
-
-    # Создаем inline-клавиатуру
     keyboard = VkKeyboard(inline=True)
-    
-    # Первый ряд: Игры
     keyboard.add_button("🎮 Игры", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("💰 Экономика", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    
-    # Второй ряд: Социальное и Профиль
-    keyboard.add_button("👥 Социальное", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("👤 Профиль", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_line()
-    
-    # Третий ряд: Помощь и Настройки
-    keyboard.add_button("❓ Помощь", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("⚙️ Настройки", color=VkKeyboardColor.SECONDARY)
-    
+    keyboard.add_button("🤖 ИИ-чат", color=VkKeyboardColor.PRIMARY)
+
     _send_with_keyboard(ctx, message, keyboard.get_keyboard())
     return None
 
@@ -1715,6 +1695,19 @@ def _handle_social_menu(ctx: RouterContext) -> Optional[str]:
     keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
     
     _send_with_keyboard(ctx, message, keyboard.get_keyboard())
+    return None
+
+def _handle_ai_chat_entry(ctx: RouterContext) -> Optional[str]:
+    """Вход в ИИ-чат: показывает краткую подсказку и включает режим диалога"""
+    message = """🤖 ИИ-чат включён
+
+Пиши любой вопрос — я постараюсь ответить. 
+
+Подсказки:
+- Чтобы вернуться в меню — напиши /menu
+- Для выбора языка — /lang
+- Чтобы очистить контекст — /reset"""
+    _send_with_keyboard(ctx, message, None)
     return None
 
 def _handle_chess(ctx: RouterContext) -> Optional[str]:
