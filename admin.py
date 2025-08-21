@@ -519,3 +519,7 @@ def get_user_privileges(user_id: int) -> set:
         return {"*"}  # Все привилегии
     
     return ROLE_PRIVILEGES.get(role, set())
+
+def can_view_stats(user_id: int) -> bool:
+    """Проверяет, может ли пользователь просматривать статистику"""
+    return has_privilege(user_id, "view_stats")

@@ -3224,6 +3224,13 @@ def main() -> None:
 		text = text_raw.lower()
 		user_id = message.from_id
 
+		# Обновляем активность пользователя
+		try:
+			from storage import update_user_activity
+			update_user_activity(user_id)
+		except Exception:
+			pass  # Игнорируем ошибки отслеживания активности
+
 		payload = {}
 		if message.payload:
 			try:

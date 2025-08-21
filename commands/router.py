@@ -632,6 +632,196 @@ def _handle_config_restore(ctx: RouterContext) -> Optional[str]:
     handle_admin_config_restore(ctx.vk, ctx.peer_id, ctx.user_id, idx_str)
     return None
 
+# -------- Команды управления ролями --------
+def _handle_role_info(ctx: RouterContext) -> Optional[str]:
+    """Показать информацию о роли пользователя"""
+    from admin import get_user_role, get_user_privileges
+    role = get_user_role(ctx.user_id)
+    privileges = get_user_privileges(ctx.user_id)
+    
+    privilege_names = {
+        "edit_content": "Редактирование контента",
+        "view_stats": "Просмотр статистики", 
+        "warn_users": "Предупреждение пользователей",
+        "delete_messages": "Удаление сообщений",
+        "kick_users": "Исключение пользователей",
+        "ban_users": "Бан пользователей",
+        "manage_roles": "Управление ролями",
+        "ai_control": "Управление ИИ"
+    }
+    
+    privilege_list = []
+    for priv in privileges:
+        if priv == "*":
+            privilege_list.append("Все привилегии")
+            break
+        privilege_list.append(privilege_names.get(priv, priv))
+    
+    return f"👤 Ваша роль: {role.value}\n🔑 Привилегии:\n" + "\n".join(f"• {priv}" for priv in privilege_list)
+
+@require_admin
+def _handle_role_set(ctx: RouterContext) -> Optional[str]:
+    """Установить роль пользователя (только для админов)"""
+    from admin import can_manage_roles, UserRole
+    from storage import set_user_profile, get_user_profile
+    
+    if not can_manage_roles(ctx.user_id):
+        return "❌ Недостаточно прав для управления ролями"
+    
+    parts = ctx.text.split()
+    if len(parts) < 3:
+        return "Использование: /role set <user_id> <role>"
+    
+    try:
+        target_id = int(parts[1])
+        role_name = parts[2].lower()
+        
+        # Проверяем существование роли
+        try:
+            role = UserRole(role_name)
+        except ValueError:
+            return f"❌ Неизвестная роль: {role_name}. Доступные: {', '.join(r.value for r in UserRole)}"
+        
+        # Получаем текущий профиль
+        profile = get_user_profile(target_id) or {}
+        profile["role"] = role.value
+        set_user_profile(target_id, profile)
+        
+        return f"✅ Роль пользователя {target_id} изменена на {role.value}"
+    except ValueError:
+        return "❌ Неверный ID пользователя"
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
+def _handle_role_list(ctx: RouterContext) -> Optional[str]:
+    """Показать список ролей"""
+    from admin import UserRole
+    
+    roles_info = []
+    for role in UserRole:
+        roles_info.append(f"• {role.value} - {_get_role_description(role)}")
+    
+    return "📋 Доступные роли:\n" + "\n".join(roles_info)
+
+def _get_role_description(role) -> str:
+    """Получить описание роли"""
+    descriptions = {
+        "user": "Обычный пользователь",
+        "editor": "Может редактировать контент",
+        "moderator": "Может модерировать чат", 
+        "admin": "Полный доступ к функциям",
+        "super_admin": "Создатель бота"
+    }
+    return descriptions.get(role.value, "Описание отсутствует")
+
+# -------- Команды мониторинга и статистики --------
+@require_admin
+def _handle_stats(ctx: RouterContext) -> Optional[str]:
+    """Показать статистику бота"""
+    from admin import can_view_stats
+    from monitoring import health_checker, metrics_collector
+    
+    if not can_view_stats(ctx.user_id):
+        return "❌ Недостаточно прав для просмотра статистики"
+    
+    try:
+        # Получаем статус здоровья
+        health_status = health_checker.get_overall_status()
+        
+        # Получаем метрики
+        total_requests = metrics_collector.get_counter("ai_requests_total")
+        successful_requests = metrics_collector.get_counter("ai_success_total")
+        failed_requests = metrics_collector.get_counter("ai_errors_total")
+        
+        # Вычисляем процент успешных запросов
+        success_rate = 0.0
+        if total_requests > 0:
+            success_rate = (successful_requests / total_requests) * 100
+        
+        # Получаем статистику кеша
+        from cache_monitoring import cache_manager
+        cache_stats = cache_manager.get_stats()
+        cache_hit_rate = cache_stats.get("hit_rate", 0.0)
+        
+        # Получаем количество активных пользователей
+        from storage import get_storage_from_env
+        storage = get_storage_from_env()
+        profiles = storage.get_all("profiles")
+        active_users = 0
+        current_time = time.time()
+        one_hour_ago = current_time - 3600
+        
+        for user_id, profile in profiles.items():
+            if isinstance(profile, dict) and 'last_activity' in profile:
+                last_activity = profile.get('last_activity', 0)
+                if last_activity > one_hour_ago:
+                    active_users += 1
+        
+        stats_text = f"""📊 Статистика бота:
+
+🏥 Статус: {health_status}
+📈 Всего запросов ИИ: {total_requests}
+✅ Успешных: {successful_requests}
+❌ Ошибок: {failed_requests}
+📊 Процент успеха: {success_rate:.1f}%
+💾 Кеш (попадания): {cache_hit_rate:.1f}%
+👥 Активных пользователей: {active_users}
+"""
+        
+        return stats_text
+    except Exception as e:
+        return f"❌ Ошибка получения статистики: {str(e)}"
+
+@require_admin
+def _handle_health(ctx: RouterContext) -> Optional[str]:
+    """Показать состояние здоровья системы"""
+    from admin import can_view_stats
+    from monitoring import health_checker
+    
+    if not can_view_stats(ctx.user_id):
+        return "❌ Недостаточно прав для просмотра состояния системы"
+    
+    try:
+        health_status = health_checker.check_health()
+        overall_status = health_checker.get_overall_status()
+        
+        status_emoji = {
+            "healthy": "✅",
+            "degraded": "⚠️", 
+            "unhealthy": "❌"
+        }
+        
+        health_text = f"🏥 Общее состояние: {status_emoji.get(overall_status, '❓')} {overall_status}\n\n"
+        
+        for service_name, status in health_status.items():
+            emoji = status_emoji.get(status.status, "❓")
+            health_text += f"{emoji} {service_name}: {status.message}\n"
+        
+        return health_text
+    except Exception as e:
+        return f"❌ Ошибка получения состояния: {str(e)}"
+
+@require_admin
+def _handle_cache_clear(ctx: RouterContext) -> Optional[str]:
+    """Очистить кеш"""
+    from admin import can_view_stats
+    from cache_monitoring import cache_manager
+    
+    if not can_view_stats(ctx.user_id):
+        return "❌ Недостаточно прав для управления кешем"
+    
+    try:
+        # Получаем статистику до очистки
+        stats_before = cache_manager.get_stats()
+        items_before = stats_before.get("size", 0)
+        
+        # Очищаем кеш
+        cache_manager.clear()
+        
+        return f"✅ Кеш очищен! Удалено {items_before} элементов."
+    except Exception as e:
+        return f"❌ Ошибка очистки кеша: {str(e)}"
+
 
 # -------- Регистрация builtin-команд --------
 
@@ -818,6 +1008,64 @@ def _register_builtin_commands() -> None:
             handler=_handle_config_restore,
             admin_required=True,
             dm_only=True,
+        )
+    )
+
+    # Команды управления ролями
+    register_command(
+        Command(
+            name="/role info",
+            aliases=["role info", "роль инфо"],
+            description="Показать информацию о своей роли",
+            handler=_handle_role_info,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/role set",
+            aliases=["role set", "роль установить"],
+            description="Установить роль пользователя: /role set <user_id> <role>",
+            handler=_handle_role_set,
+            admin_required=True,
+        )
+    )
+    register_command(
+        Command(
+            name="/role list",
+            aliases=["role list", "роль список"],
+            description="Показать список доступных ролей",
+            handler=_handle_role_list,
+            admin_required=False,
+        )
+    )
+
+    # Команды мониторинга
+    register_command(
+        Command(
+            name="/stats",
+            aliases=["stats", "статистика"],
+            description="Показать статистику бота",
+            handler=_handle_stats,
+            admin_required=True,
+        )
+    )
+    register_command(
+        Command(
+            name="/health",
+            aliases=["health", "здоровье"],
+            description="Показать состояние системы",
+            handler=_handle_health,
+            admin_required=True,
+        )
+    )
+    register_command(
+        Command(
+            name="/cache clear",
+            aliases=["cache clear", "кеш очистить"],
+            description="Очистить кеш",
+            handler=_handle_cache_clear,
+            admin_required=True,
         )
     )
 

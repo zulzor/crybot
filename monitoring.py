@@ -207,60 +207,92 @@ class HealthChecker:
     
     def _check_system_resources(self):
         """Проверяет системные ресурсы"""
-        import psutil
-        
-        # CPU
-        cpu_percent = psutil.cpu_percent(interval=1)
-        if cpu_percent < 80:
-            status = "healthy"
-        elif cpu_percent < 95:
-            status = "degraded"
-        else:
-            status = "unhealthy"
+        try:
+            import psutil
             
-        self.health_status["cpu"] = HealthStatus(
-            service="CPU",
-            status=status,
-            message=f"Использование CPU: {cpu_percent}%",
-            timestamp=time.time(),
-            details={"cpu_percent": cpu_percent}
-        )
-        
-        # Memory
-        memory = psutil.virtual_memory()
-        memory_percent = memory.percent
-        if memory_percent < 80:
-            status = "healthy"
-        elif memory_percent < 95:
-            status = "degraded"
-        else:
-            status = "unhealthy"
+            # CPU
+            cpu_percent = psutil.cpu_percent(interval=1)
+            if cpu_percent < 80:
+                status = "healthy"
+            elif cpu_percent < 95:
+                status = "degraded"
+            else:
+                status = "unhealthy"
+                
+            self.health_status["cpu"] = HealthStatus(
+                service="CPU",
+                status=status,
+                message=f"Использование CPU: {cpu_percent}%",
+                timestamp=time.time(),
+                details={"cpu_percent": cpu_percent}
+            )
             
-        self.health_status["memory"] = HealthStatus(
-            service="Memory",
-            status=status,
-            message=f"Использование памяти: {memory_percent}%",
-            timestamp=time.time(),
-            details={"memory_percent": memory_percent, "available_gb": memory.available / (1024**3)}
-        )
-        
-        # Disk
-        disk = psutil.disk_usage('/')
-        disk_percent = disk.percent
-        if disk_percent < 80:
-            status = "healthy"
-        elif disk_percent < 95:
-            status = "degraded"
-        else:
-            status = "unhealthy"
+            # Memory
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+            if memory_percent < 80:
+                status = "healthy"
+            elif memory_percent < 95:
+                status = "degraded"
+            else:
+                status = "unhealthy"
+                
+            self.health_status["memory"] = HealthStatus(
+                service="Memory",
+                status=status,
+                message=f"Использование памяти: {memory_percent}%",
+                timestamp=time.time(),
+                details={"memory_percent": memory_percent, "available_gb": memory.available / (1024**3)}
+            )
             
-        self.health_status["disk"] = HealthStatus(
-            service="Disk",
-            status=status,
-            message=f"Использование диска: {disk_percent}%",
-            timestamp=time.time(),
-            details={"disk_percent": disk_percent, "free_gb": disk.free / (1024**3)}
-        )
+            # Disk
+            disk = psutil.disk_usage('/')
+            disk_percent = disk.percent
+            if disk_percent < 80:
+                status = "healthy"
+            elif disk_percent < 95:
+                status = "degraded"
+            else:
+                status = "unhealthy"
+                
+            self.health_status["disk"] = HealthStatus(
+                service="Disk",
+                status=status,
+                message=f"Использование диска: {disk_percent}%",
+                timestamp=time.time(),
+                details={"disk_percent": disk_percent, "free_gb": disk.free / (1024**3)}
+            )
+        except ImportError:
+            # psutil не установлен - создаем заглушки
+            self.health_status["cpu"] = HealthStatus(
+                service="CPU",
+                status="degraded",
+                message="psutil не установлен - мониторинг CPU недоступен",
+                timestamp=time.time(),
+                details={"error": "psutil_not_installed"}
+            )
+            self.health_status["memory"] = HealthStatus(
+                service="Memory",
+                status="degraded",
+                message="psutil не установлен - мониторинг памяти недоступен",
+                timestamp=time.time(),
+                details={"error": "psutil_not_installed"}
+            )
+            self.health_status["disk"] = HealthStatus(
+                service="Disk",
+                status="degraded",
+                message="psutil не установлен - мониторинг диска недоступен",
+                timestamp=time.time(),
+                details={"error": "psutil_not_installed"}
+            )
+        except Exception as e:
+            self.health_status["system_resources"] = HealthStatus(
+                service="System Resources",
+                status="unhealthy",
+                message=f"Ошибка мониторинга ресурсов: {str(e)}",
+                timestamp=time.time(),
+                details={"error": str(e)}
+            )
     
     def _check_database(self):
         """Проверяет базу данных"""
