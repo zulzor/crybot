@@ -53,7 +53,12 @@ class EconomyManager:
         self.wallets: Dict[int, UserWallet] = {}
         self.inventories: Dict[int, UserInventory] = {}
         self.shop_items: Dict[str, ShopItem] = {}
+        self.tournaments: Dict[str, Tournament] = {}
+        self.leaderboards: Dict[str, Dict[int, Leaderboard]] = {}  # game_type -> user_id -> Leaderboard
+        self.achievements: Dict[str, Achievement] = {}
+        self.user_achievements: Dict[int, Dict[str, UserAchievement]] = {}  # user_id -> achievement_id -> UserAchievement
         self._init_shop()
+        self._init_achievements()
         self._storage = get_storage_from_env()
     
     def _init_shop(self):
@@ -157,6 +162,162 @@ class EconomyManager:
             effects={"defense": 8},
             is_consumable=False
         )
+    
+    def _init_achievements(self):
+        """Инициализация достижений"""
+        # Достижения за игры
+        self.achievements["first_win"] = Achievement(
+            id="first_win",
+            name="🎯 Первая победа",
+            description="Выиграйте свою первую игру",
+            icon="🎯",
+            condition="games_won_1",
+            reward=50
+        )
+        
+        self.achievements["game_master"] = Achievement(
+            id="game_master",
+            name="🏆 Мастер игр",
+            description="Выиграйте 10 игр",
+            icon="🏆",
+            condition="games_won_10",
+            reward=200
+        )
+        
+        self.achievements["high_scorer"] = Achievement(
+            id="high_scorer",
+            name="⭐ Высокий счёт",
+            description="Наберите 1000 очков в играх",
+            icon="⭐",
+            condition="total_score_1000",
+            reward=300
+        )
+        
+        # Достижения за экономику
+        self.achievements["rich_player"] = Achievement(
+            id="rich_player",
+            name="💰 Богач",
+            description="Накопите 5000 монет",
+            icon="💰",
+            condition="total_money_5000",
+            reward=500
+        )
+        
+        self.achievements["craftsman"] = Achievement(
+            id="craftsman",
+            name="🔨 Мастер-крафтер",
+            description="Создайте 5 предметов",
+            icon="🔨",
+            condition="items_crafted_5",
+            reward=150
+        )
+        
+        # Достижения за социальное
+        self.achievements["social_butterfly"] = Achievement(
+            id="social_butterfly",
+            name="🦋 Общительный",
+            description="Добавьте 5 друзей",
+            icon="🦋",
+            condition="friends_5",
+            reward=100
+        )
+        
+        self.achievements["married"] = Achievement(
+            id="married",
+            name="💍 Женат",
+            description="Вступите в брак",
+            icon="💍",
+            condition="married_1",
+            reward=250
+        )
+    
+    def check_achievements(self, user_id: int, action: str, value: int = 1) -> List[str]:
+        """Проверка и выдача достижений"""
+        unlocked = []
+        
+        # Получаем статистику пользователя
+        stats = self._get_user_stats(user_id)
+        
+        for achievement in self.achievements.values():
+            if achievement.id in self.user_achievements.get(user_id, {}):
+                continue  # Уже получено
+            
+            if self._check_achievement_condition(achievement, stats, action, value):
+                # Выдаем достижение
+                if user_id not in self.user_achievements:
+                    self.user_achievements[user_id] = {}
+                
+                self.user_achievements[user_id][achievement.id] = UserAchievement(
+                    user_id=user_id,
+                    achievement_id=achievement.id
+                )
+                
+                # Выдаем награду
+                self.add_money(user_id, achievement.reward)
+                unlocked.append(f"{achievement.icon} {achievement.name} (+{achievement.reward} 🪙)")
+        
+        return unlocked
+    
+    def _get_user_stats(self, user_id: int) -> Dict[str, int]:
+        """Получение статистики пользователя"""
+        stats = {
+            "games_won": 0,
+            "total_score": 0,
+            "total_money": 0,
+            "items_crafted": 0,
+            "friends": 0,
+            "married": 0
+        }
+        
+        # Подсчитываем статистику из разных источников
+        for game_type in self.leaderboards:
+            if user_id in self.leaderboards[game_type]:
+                lb = self.leaderboards[game_type][user_id]
+                stats["games_won"] += lb.wins
+                stats["total_score"] += lb.score
+        
+        wallet = self.get_wallet(user_id)
+        stats["total_money"] = wallet.total_earned
+        
+        return stats
+    
+    def _check_achievement_condition(self, achievement: Achievement, stats: Dict[str, int], action: str, value: int) -> bool:
+        """Проверка условия достижения"""
+        condition = achievement.condition
+        
+        if condition == "games_won_1" and stats["games_won"] >= 1:
+            return True
+        elif condition == "games_won_10" and stats["games_won"] >= 10:
+            return True
+        elif condition == "total_score_1000" and stats["total_score"] >= 1000:
+            return True
+        elif condition == "total_money_5000" and stats["total_money"] >= 5000:
+            return True
+        elif condition == "items_crafted_5" and stats["items_crafted"] >= 5:
+            return True
+        elif condition == "friends_5" and stats["friends"] >= 5:
+            return True
+        elif condition == "married_1" and stats["married"] >= 1:
+            return True
+        
+        return False
+    
+    def get_user_achievements(self, user_id: int) -> str:
+        """Получение достижений пользователя"""
+        if user_id not in self.user_achievements:
+            return "🏆 У вас пока нет достижений"
+        
+        user_achs = self.user_achievements[user_id]
+        result = "🏆 Ваши достижения:\n\n"
+        
+        for ach_id, user_ach in user_achs.items():
+            achievement = self.achievements.get(ach_id)
+            if achievement:
+                result += f"{achievement.icon} {achievement.name}\n"
+                result += f"   {achievement.description}\n"
+                result += f"   Получено: {time.strftime('%d.%m.%Y', time.localtime(user_ach.unlocked_at))}\n\n"
+        
+        return result
     
     def get_wallet(self, user_id: int) -> UserWallet:
         if user_id in self.wallets:
@@ -370,6 +531,109 @@ class EconomyManager:
         
         return result
     
+    def create_tournament(self, name: str, game_type: str, entry_fee: int, max_participants: int = 16) -> str:
+        """Создание турнира"""
+        tournament_id = f"tournament_{int(time.time())}"
+        
+        tournament = Tournament(
+            id=tournament_id,
+            name=name,
+            game_type=game_type,
+            entry_fee=entry_fee,
+            prize_pool=entry_fee * max_participants,
+            max_participants=max_participants
+        )
+        
+        self.tournaments[tournament_id] = tournament
+        
+        return f"🏆 Турнир создан!\n\nНазвание: {name}\nИгра: {game_type}\nВзнос: {entry_fee} 🪙\nПризовой фонд: {tournament.prize_pool} 🪙\nУчастников: 0/{max_participants}\n\nID турнира: {tournament_id}"
+    
+    def join_tournament(self, user_id: int, tournament_id: str) -> str:
+        """Присоединение к турниру"""
+        if tournament_id not in self.tournaments:
+            return "❌ Турнир не найден"
+        
+        tournament = self.tournaments[tournament_id]
+        if not tournament.is_active:
+            return "❌ Турнир завершён"
+        
+        if user_id in tournament.participants:
+            return "❌ Вы уже участвуете в турнире"
+        
+        if len(tournament.participants) >= tournament.max_participants:
+            return "❌ Турнир заполнен"
+        
+        # Проверяем взнос
+        wallet = self.get_wallet(user_id)
+        if wallet.balance.get(Currency.CRYCOIN, 0) < tournament.entry_fee:
+            return f"❌ Недостаточно средств. Нужно {tournament.entry_fee} 🪙"
+        
+        # Списываем взнос
+        self.spend_money(user_id, tournament.entry_fee)
+        tournament.participants.append(user_id)
+        
+        return f"✅ Вы присоединились к турниру '{tournament.name}'!\nУчастников: {len(tournament.participants)}/{tournament.max_participants}"
+    
+    def get_tournaments(self) -> str:
+        """Список активных турниров"""
+        active_tournaments = [t for t in self.tournaments.values() if t.is_active]
+        
+        if not active_tournaments:
+            return "🏆 Активных турниров нет"
+        
+        result = "🏆 Активные турниры:\n\n"
+        for tournament in active_tournaments[:5]:  # Показываем первые 5
+            result += f"📋 {tournament.name}\n"
+            result += f"🎮 Игра: {tournament.game_type}\n"
+            result += f"💰 Взнос: {tournament.entry_fee} 🪙\n"
+            result += f"🏆 Призовой фонд: {tournament.prize_pool} 🪙\n"
+            result += f"👥 Участников: {len(tournament.participants)}/{tournament.max_participants}\n"
+            result += f"🏷️ ID: {tournament.id}\n\n"
+        
+        return result
+    
+    def update_leaderboard(self, user_id: int, game_type: str, won: bool, score: int = 0) -> None:
+        """Обновление рейтинга игрока"""
+        if game_type not in self.leaderboards:
+            self.leaderboards[game_type] = {}
+        
+        if user_id not in self.leaderboards[game_type]:
+            self.leaderboards[game_type][user_id] = Leaderboard(
+                user_id=user_id,
+                game_type=game_type,
+                score=0,
+                wins=0,
+                losses=0,
+                total_games=0
+            )
+        
+        leaderboard = self.leaderboards[game_type][user_id]
+        leaderboard.total_games += 1
+        leaderboard.score += score
+        
+        if won:
+            leaderboard.wins += 1
+        else:
+            leaderboard.losses += 1
+        
+        leaderboard.last_updated = time.time()
+    
+    def get_leaderboard(self, game_type: str, limit: int = 10) -> str:
+        """Получение рейтинга по игре"""
+        if game_type not in self.leaderboards:
+            return f"📊 Рейтинг по {game_type} пуст"
+        
+        players = list(self.leaderboards[game_type].values())
+        players.sort(key=lambda x: x.score, reverse=True)
+        
+        result = f"📊 Рейтинг по {game_type}:\n\n"
+        for i, player in enumerate(players[:limit], 1):
+            win_rate = (player.wins / player.total_games * 100) if player.total_games > 0 else 0
+            result += f"{i}. Игрок {player.user_id}\n"
+            result += f"   Очки: {player.score} | Победы: {player.wins}/{player.total_games} ({win_rate:.1f}%)\n\n"
+        
+        return result
+    
     def daily_bonus(self, user_id: int) -> str:
         wallet = self.get_wallet(user_id)
         now = time.time()
@@ -508,6 +772,47 @@ class Marriage:
     married_at: float
     is_active: bool = True
     divorce_requested_by: Optional[int] = None
+
+@dataclass
+class Tournament:
+    id: str
+    name: str
+    game_type: str  # "chess", "poker", "hangman", "crossword"
+    entry_fee: int
+    prize_pool: int
+    max_participants: int
+    participants: List[int] = field(default_factory=list)
+    start_time: float = field(default_factory=time.time)
+    end_time: Optional[float] = None
+    is_active: bool = True
+    winner_id: Optional[int] = None
+
+@dataclass
+class Leaderboard:
+    user_id: int
+    game_type: str
+    score: int
+    wins: int
+    losses: int
+    total_games: int
+    last_updated: float = field(default_factory=time.time)
+
+@dataclass
+class Achievement:
+    id: str
+    name: str
+    description: str
+    icon: str
+    condition: str  # "games_won_10", "total_score_1000", etc.
+    reward: int  # монеты за получение
+    is_hidden: bool = False
+
+@dataclass
+class UserAchievement:
+    user_id: int
+    achievement_id: str
+    unlocked_at: float = field(default_factory=time.time)
+    progress: int = 0  # для прогрессивных достижений
 
 
 class SocialManager:

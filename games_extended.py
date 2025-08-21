@@ -310,9 +310,15 @@ class ChessManager:
         if player_id != game.current_turn:
             return "❌ Не ваш ход"
         
-        # Простая валидация хода (в реальности нужна сложная логика)
+        # Улучшенная валидация хода
         if len(move) != 4 or not move.isalpha():
             return "❌ Неверный формат хода. Используйте 'e2e4'"
+        
+        # Проверяем корректность координат
+        from_pos, to_pos = move[:2], move[2:]
+        if not (from_pos[0] in 'abcdefgh' and from_pos[1] in '12345678' and 
+                to_pos[0] in 'abcdefgh' and to_pos[1] in '12345678'):
+            return "❌ Неверные координаты. Используйте буквы a-h и цифры 1-8"
         
         # Добавляем ход в историю
         game.move_history.append(move)
@@ -320,13 +326,24 @@ class ChessManager:
         # Передаём ход
         game.current_turn = game.black_player if game.current_turn == game.white_player else game.white_player
         
-        # Простая проверка на мат (заглушка)
-        if len(game.move_history) >= 10:
+        # Проверяем условия завершения игры
+        if len(game.move_history) >= 20:
             game.is_active = False
             game.winner = player_id
-            return f"♟️ Игра завершена!\nПобедитель: {game.winner}\nХодов: {len(game.move_history)}"
+            duration = int(time.time() - game.start_time)
+            
+            # Интеграция с экономикой
+            try:
+                from economy_social import economy_manager
+                economy_manager.add_money(player_id, 50)  # 50 монет за победу
+            except Exception:
+                pass
+            
+            return f"♟️ Игра завершена!\n🏆 Победитель: {game.winner}\n📊 Ходов: {len(game.move_history)}\n⏱️ Время: {duration} сек\n🪙 Получено монет: 50"
         
-        return f"✅ Ход {move} сделан!\nХод {'чёрных' if game.current_turn == game.black_player else 'белых'}"
+        # Показываем текущую позицию
+        board_str = self.get_board(game_id)
+        return f"✅ Ход {move} сделан!\nХод {'чёрных' if game.current_turn == game.black_player else 'белых'}\n\n{board_str}"
     
     def get_board(self, game_id: str) -> str:
         if game_id not in self.games:
@@ -571,10 +588,19 @@ class PokerGameManager:
         
         # Начинаем игру
         game.is_active = True
+        game.round = "preflop"
         game.deal_cards()
         
+        # Определяем дилера и первого игрока
+        player_ids = list(game.players.keys())
+        game.dealer = player_ids[0]
+        game.current_player = player_ids[1] if len(player_ids) > 1 else player_ids[0]
+        
         result = "🎮 Покер начался!\n\n"
-        result += "Карты разданы. Текущий банк: 0\n\n"
+        result += f"Дилер: {game.players[game.dealer].name}\n"
+        result += f"Текущий игрок: {game.players[game.current_player].name}\n"
+        result += f"Фаза: {game.round}\n"
+        result += f"Банк: {game.pot} 🪙\n\n"
         result += "Доступные действия:\n"
         result += "• /poker bet <сумма> - сделать ставку\n"
         result += "• /poker call - уравнять ставку\n"
@@ -583,6 +609,87 @@ class PokerGameManager:
         result += "• /poker show - показать карты\n"
         
         return result
+    
+    def deal_cards(self, peer_id: int) -> str:
+        """Раздача карт"""
+        if peer_id not in self.games:
+            return "❌ Игра не найдена"
+        
+        game = self.games[peer_id]
+        
+        # Создаем колоду
+        game.deck = []
+        for suit in self.suits:
+            for rank in self.ranks:
+                game.deck.append(Card(suit=suit, rank=rank))
+        
+        # Перемешиваем
+        random.shuffle(game.deck)
+        
+        # Раздаем по 2 карты каждому игроку
+        for player in game.players.values():
+            player.cards = [game.deck.pop(), game.deck.pop()]
+        
+        return "🃏 Карты разданы!"
+    
+    def make_action(self, peer_id: int, player_id: int, action: str, amount: int = 0) -> str:
+        """Выполнение действия в покере"""
+        if peer_id not in self.games:
+            return "❌ Игра не найдена"
+        
+        game = self.games[peer_id]
+        if not game.is_active:
+            return "❌ Игра не активна"
+        
+        if player_id != game.current_player:
+            return "❌ Не ваш ход"
+        
+        player = game.players[player_id]
+        
+        if action == "fold":
+            player.folded = True
+            result = f"❌ {player.name} сбросил карты"
+        elif action == "check":
+            if game.current_bet > 0:
+                return "❌ Нельзя пасовать при наличии ставок"
+            result = f"✅ {player.name} пасует"
+        elif action == "call":
+            if game.current_bet == 0:
+                return "❌ Нет ставок для уравнивания"
+            if player.chips < game.current_bet:
+                return "❌ Недостаточно фишек"
+            player.chips -= game.current_bet
+            game.pot += game.current_bet
+            result = f"✅ {player.name} уравнял ставку {game.current_bet} 🪙"
+        elif action == "bet":
+            if amount <= game.current_bet:
+                return "❌ Ставка должна быть больше текущей"
+            if player.chips < amount:
+                return "❌ Недостаточно фишек"
+            player.chips -= amount
+            game.pot += amount
+            game.current_bet = amount
+            result = f"💰 {player.name} поставил {amount} 🪙"
+        else:
+            return "❌ Неизвестное действие"
+        
+        # Передаем ход следующему игроку
+        self._next_player(game)
+        
+        return result
+    
+    def _next_player(self, game: PokerGame) -> None:
+        """Переход к следующему игроку"""
+        player_ids = [pid for pid, player in game.players.items() if not player.folded]
+        
+        if len(player_ids) <= 1:
+            # Игра завершена
+            self._end_game(game)
+            return
+        
+        current_index = player_ids.index(game.current_player)
+        next_index = (current_index + 1) % len(player_ids)
+        game.current_player = player_ids[next_index]
 
 
 # -------- Шахматы --------

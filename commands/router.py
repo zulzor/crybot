@@ -650,6 +650,30 @@ def _handle_poker_start(ctx: RouterContext) -> Optional[str]:
     from games_extended import poker_manager
     return poker_manager.start_game(ctx.peer_id)
 
+def _handle_poker_bet(ctx: RouterContext) -> Optional[str]:
+    """Ставка в покере"""
+    from games_extended import poker_manager
+    try:
+        amount = int(ctx.text.strip())
+        return poker_manager.make_action(ctx.peer_id, ctx.user_id, "bet", amount)
+    except ValueError:
+        return "❌ Укажите сумму ставки: /poker bet <amount>"
+
+def _handle_poker_call(ctx: RouterContext) -> Optional[str]:
+    """Уравнять ставку в покере"""
+    from games_extended import poker_manager
+    return poker_manager.make_action(ctx.peer_id, ctx.user_id, "call")
+
+def _handle_poker_fold(ctx: RouterContext) -> Optional[str]:
+    """Сбросить карты в покере"""
+    from games_extended import poker_manager
+    return poker_manager.make_action(ctx.peer_id, ctx.user_id, "fold")
+
+def _handle_poker_check(ctx: RouterContext) -> Optional[str]:
+    """Пасовать в покере"""
+    from games_extended import poker_manager
+    return poker_manager.make_action(ctx.peer_id, ctx.user_id, "check")
+
 # -------- Команды экономики --------
 def _handle_daily(ctx: RouterContext) -> Optional[str]:
     """Ежедневный бонус"""
@@ -712,6 +736,44 @@ def _handle_auction_list(ctx: RouterContext) -> Optional[str]:
     """Список активных аукционов"""
     from economy_social import economy_manager
     return economy_manager.get_active_auctions()
+
+def _handle_tournament_create(ctx: RouterContext) -> Optional[str]:
+    """Создание турнира"""
+    from economy_social import economy_manager
+    parts = ctx.text.strip().split()
+    if len(parts) < 3:
+        return "❌ Использование: /tournament create <name> <game_type> <entry_fee>"
+    
+    name = parts[0]
+    game_type = parts[1]
+    try:
+        entry_fee = int(parts[2])
+    except ValueError:
+        return "❌ Взнос должен быть числом"
+    
+    return economy_manager.create_tournament(name, game_type, entry_fee)
+
+def _handle_tournament_join(ctx: RouterContext) -> Optional[str]:
+    """Присоединение к турниру"""
+    from economy_social import economy_manager
+    tournament_id = ctx.text.strip()
+    return economy_manager.join_tournament(ctx.user_id, tournament_id)
+
+def _handle_tournament_list(ctx: RouterContext) -> Optional[str]:
+    """Список активных турниров"""
+    from economy_social import economy_manager
+    return economy_manager.get_tournaments()
+
+def _handle_leaderboard(ctx: RouterContext) -> Optional[str]:
+    """Рейтинг по игре"""
+    from economy_social import economy_manager
+    game_type = ctx.text.strip() if ctx.text.strip() else "chess"
+    return economy_manager.get_leaderboard(game_type)
+
+def _handle_achievements(ctx: RouterContext) -> Optional[str]:
+    """Показать достижения"""
+    from economy_social import economy_manager
+    return economy_manager.get_user_achievements(ctx.user_id)
 
 # -------- Социальные команды --------
 def _handle_profile(ctx: RouterContext) -> Optional[str]:
@@ -1055,6 +1117,42 @@ def _register_builtin_commands() -> None:
     )
     register_command(
         Command(
+            name="/poker bet",
+            aliases=["poker bet", "покер ставка"],
+            description="Сделать ставку: /poker bet <amount>",
+            handler=_handle_poker_bet,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker call",
+            aliases=["poker call", "покер уравнять"],
+            description="Уравнять ставку",
+            handler=_handle_poker_call,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker fold",
+            aliases=["poker fold", "покер сбросить"],
+            description="Сбросить карты",
+            handler=_handle_poker_fold,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/poker check",
+            aliases=["poker check", "покер пас"],
+            description="Пасовать (если нет ставок)",
+            handler=_handle_poker_check,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
             name="/chess",
             aliases=["chess", "шахматы"],
             description="Создать шахматную партию",
@@ -1169,6 +1267,51 @@ def _register_builtin_commands() -> None:
             aliases=["auction list", "аукцион список"],
             description="Список активных аукционов",
             handler=_handle_auction_list,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/tournament create",
+            aliases=["tournament create", "турнир создать"],
+            description="Создать турнир: /tournament create <name> <game_type> <entry_fee>",
+            handler=_handle_tournament_create,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/tournament join",
+            aliases=["tournament join", "турнир присоединиться"],
+            description="Присоединиться к турниру: /tournament join <tournament_id>",
+            handler=_handle_tournament_join,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/tournament list",
+            aliases=["tournament list", "турнир список"],
+            description="Список активных турниров",
+            handler=_handle_tournament_list,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/leaderboard",
+            aliases=["leaderboard", "рейтинг"],
+            description="Рейтинг по игре: /leaderboard <game_type>",
+            handler=_handle_leaderboard,
+            admin_required=False,
+        )
+    )
+    register_command(
+        Command(
+            name="/achievements",
+            aliases=["achievements", "достижения"],
+            description="Показать ваши достижения",
+            handler=_handle_achievements,
             admin_required=False,
         )
     )
