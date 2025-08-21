@@ -4,9 +4,12 @@
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from enum import Enum
 from storage import get_storage_from_env
+
+if TYPE_CHECKING:
+    from typing import TYPE_CHECKING
 
 
 # -------- Экономика --------
@@ -55,8 +58,8 @@ class EconomyManager:
         self.shop_items: Dict[str, ShopItem] = {}
         self.tournaments: Dict[str, Tournament] = {}
         self.leaderboards: Dict[str, Dict[int, Leaderboard]] = {}  # game_type -> user_id -> Leaderboard
-        self.achievements: Dict[str, Achievement] = {}
-        self.user_achievements: Dict[int, Dict[str, UserAchievement]] = {}  # user_id -> achievement_id -> UserAchievement
+        self.achievements: Dict[str, 'Achievement'] = {}
+        self.user_achievements: Dict[int, Dict[str, 'UserAchievement']] = {}  # user_id -> achievement_id -> UserAchievement
         self._init_shop()
         self._init_achievements()
         self._storage = get_storage_from_env()
@@ -281,7 +284,7 @@ class EconomyManager:
         
         return stats
     
-    def _check_achievement_condition(self, achievement: Achievement, stats: Dict[str, int], action: str, value: int) -> bool:
+    def _check_achievement_condition(self, achievement, stats: Dict[str, int], action: str, value: int) -> bool:
         """Проверка условия достижения"""
         condition = achievement.condition
         
