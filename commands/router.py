@@ -63,28 +63,8 @@ def dispatch_command(
         _awaiting_name.discard(user_id)
         return True, f"✅ Спасибо, {name}! Доступ к играм открыт. Откройте 🎮 Игры."
 
-    if lower in {"/start", "start", "начать"}:
-        ver = get_version()
-        msg = (
-            f"🎮 CryBot\n\nВерсия: `{ver}`\n\nВыберите раздел:" if is_dm else f"👋 CryBot (версия `{ver}`)"
-        )
-        if is_dm:
-            from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-            kb = VkKeyboard(inline=True)
-            for label in ["🛒 Экономика", "👥 Социальное"]:
-                kb.add_button(label, color=VkKeyboardColor.PRIMARY)
-            kb.add_line()
-            for label in ["🎮 Игры", "🤖 ИИ-чат"]:
-                kb.add_button(label, color=VkKeyboardColor.PRIMARY)
-            kb.add_line()
-            for label in ["🌐 Язык", "🔐 Админ"]:
-                kb.add_button(label, color=VkKeyboardColor.SECONDARY)
-            kb.add_line()
-            for label in ["📖 Инструкция", "🗺️ Карта бота"]:
-                kb.add_button(label, color=VkKeyboardColor.SECONDARY)
-            vk.messages.send(peer_id=peer_id, message=msg, random_id=0, keyboard=kb.get_keyboard())
-            return True, None
-        return True, msg
+    # Не перехватываем /start — пусть основной обработчик в bot_vk.py
+    # установит обычную (не inline) клавиатуру.
 
     if lower in {"/games", "🎮 игры"}:
         prof = _get_profile(storage, user_id)
